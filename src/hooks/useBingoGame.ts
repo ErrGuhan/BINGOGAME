@@ -187,6 +187,13 @@ export function useBingoGame(initialRoomCode?: string) {
     }
   }, [p1?.id, syncGameState]);
 
+  // Stable refs for callbacks to prevent teardown of Realtime channels
+  const handleRealtimeEventRef = useRef(handleRealtimeEvent);
+  handleRealtimeEventRef.current = handleRealtimeEvent;
+
+  const syncGameStateRef = useRef(syncGameState);
+  syncGameStateRef.current = syncGameState;
+
   // Setup Realtime Channels & Subscriptions with Active Auto-Recovery
   useEffect(() => {
     if (!game?.room_code) return;
@@ -209,22 +216,33 @@ export function useBingoGame(initialRoomCode?: string) {
       });
 
       channel
-        .on('broadcast', { event: 'NUMBER_CALLED' }, ({ payload }) => handleRealtimeEvent('NUMBER_CALLED', payload))
-        .on('broadcast', { event: 'PLAYER_JOINED' }, ({ payload }) => handleRealtimeEvent('PLAYER_JOINED', payload))
-        .on('broadcast', { event: 'PLAYER_READY' }, ({ payload }) => handleRealtimeEvent('PLAYER_READY', payload))
-        .on('broadcast', { event: 'TIMEOUT_WIN_CLAIMED' }, ({ payload }) => handleRealtimeEvent('TIMEOUT_WIN_CLAIMED', payload))
-        .on('broadcast', { event: 'HEARTBEAT' }, ({ payload }) => handleRealtimeEvent('HEARTBEAT', payload))
+        .on('broadcast', { event: 'NUMBER_CALLED' }, ({ payload }) => handleRealtimeEventRef.current('NUMBER_CALLED', payload))
+        .on('broadcast', { event: 'PLAYER_JOINED' }, ({ payload }) => handleRealtimeEventRef.current('PLAYER_JOINED', payload))
+        .on('broadcast', { event: 'PLAYER_READY' }, ({ payload }) => handleRealtimeEventRef.current('PLAYER_READY', payload))
+        .on('broadcast', { event: 'TIMEOUT_WIN_CLAIMED' }, ({ payload }) => handleRealtimeEventRef.current('TIMEOUT_WIN_CLAIMED', payload))
+        .on('broadcast', { event: 'HEARTBEAT' }, ({ payload }) => handleRealtimeEventRef.current('HEARTBEAT', payload))
+        // Direct Database Postgres Changes: Fires in ~50ms whenever a number is called in Supabase
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'called_numbers' }, (payload) => {
+          if (gameRef.current?.id && (payload.new as { game_id?: string })?.game_id === gameRef.current.id) {
+            syncGameStateRef.current(gameRef.current.id);
+          }
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games' }, (payload) => {
+          if (gameRef.current?.id && (payload.new as { id?: string })?.id === gameRef.current.id) {
+            syncGameStateRef.current(gameRef.current.id);
+          }
+        })
         .subscribe((status, err) => {
           if (status === 'SUBSCRIBED') {
             reconnectAttemptRef.current = 0;
             // Immediate state sync upon connecting/reconnecting
             if (gameRef.current?.id) {
-              syncGameState(gameRef.current.id);
+              syncGameStateRef.current(gameRef.current.id);
             }
           } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
             console.warn(`Realtime channel status: ${status}. Scheduling recovery...`, err);
             if (!isDisposed) {
-              const backoffDelay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), 8000);
+              const backoffDelay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), 6000);
               reconnectAttemptRef.current += 1;
               if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
               reconnectTimerRef.current = setTimeout(() => {
@@ -244,13 +262,13 @@ export function useBingoGame(initialRoomCode?: string) {
     const handleOnline = () => {
       reconnectAttemptRef.current = 0;
       setupChannel();
-      if (gameRef.current?.id) syncGameState(gameRef.current.id);
+      if (gameRef.current?.id) syncGameStateRef.current(gameRef.current.id);
     };
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         if (gameRef.current?.id) {
-          syncGameState(gameRef.current.id);
+          syncGameStateRef.current(gameRef.current.id);
         }
       }
     };
@@ -268,18 +286,21 @@ export function useBingoGame(initialRoomCode?: string) {
       }
       channelRef.current = null;
     };
-  }, [game?.room_code, handleRealtimeEvent, syncGameState]);
+  }, [game?.room_code]);
 
-  // Lobby polling fallback (every 2.5s) while in waiting or ready state
+  // Active game polling fallback (Fast 1.2s during playing, 2.5s in lobby)
   useEffect(() => {
-    if (!game?.id || (game.status !== 'waiting' && game.status !== 'ready')) return;
+    if (!game?.id || game.status === 'completed') return;
 
+    const pollRate = game.status === 'playing' ? 1200 : 2500;
     const pollInterval = setInterval(() => {
-      syncGameState(game.id);
-    }, 2500);
+      if (gameRef.current?.id) {
+        syncGameStateRef.current(gameRef.current.id);
+      }
+    }, pollRate);
 
     return () => clearInterval(pollInterval);
-  }, [game?.id, game?.status, syncGameState]);
+  }, [game?.id, game?.status]);
 
   // Presence Heartbeat Loop (every 10s)
   useEffect(() => {
@@ -565,15 +586,20 @@ export function useBingoGame(initialRoomCode?: string) {
 
       const result = data as CallNumberResult;
 
-      // Broadcast to opponent instantly via Supabase Realtime
-      channelRef.current?.send({
-        type: 'broadcast',
-        event: 'NUMBER_CALLED',
-        payload: result,
-      });
-
-      // Apply local state
+      // 1. Immediately apply local state
       handleRealtimeEvent('NUMBER_CALLED', result);
+
+      // 2. Broadcast to opponent instantly via Supabase Realtime
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'NUMBER_CALLED',
+          payload: result,
+        }).catch(err => console.warn('Realtime broadcast warning:', err));
+      }
+
+      // 3. Fast sync in background to guarantee full state integrity
+      syncGameState(game.id).catch(() => {});
     } catch (err: unknown) {
       // Rollback on rejection (e.g., turn desync)
       setOptimisticCalled(null);
@@ -581,7 +607,7 @@ export function useBingoGame(initialRoomCode?: string) {
       setError(msg);
       sounds.playAlert();
     }
-  }, [calledNumbers, game?.id, getSession, handleRealtimeEvent, isMyTurn]);
+  }, [calledNumbers, game?.id, getSession, handleRealtimeEvent, isMyTurn, syncGameState]);
 
   // ACTION: Claim Timeout Win
   const claimTimeoutWin = useCallback(async () => {
