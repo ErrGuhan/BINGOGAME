@@ -104,7 +104,7 @@ interface MainGameScreenProps {
   calledNumbers: CalledNumber[];
   isMyTurn: boolean;
   myLines: number;
-  opponentLines: number;
+  opponentLines?: number;
   playerName: string;
   opponentName: string;
   onCallNumber: (num: number) => Promise<void>;
@@ -118,7 +118,6 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
   calledNumbers,
   isMyTurn,
   myLines,
-  opponentLines,
   playerName,
   opponentName,
   onCallNumber,
@@ -236,8 +235,8 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
               <span className="font-headline-sm text-xs text-on-surface font-bold truncate max-w-[80px]">
                 {opponentName}
               </span>
-              <span className="font-label-sm text-[11px] text-secondary-fixed-dim font-extrabold leading-none mt-0.5">
-                {opponentLines} / 5 Lines
+              <span className="font-label-sm text-[11px] text-secondary-fixed font-bold leading-none mt-0.5">
+                Rival
               </span>
             </div>
             <div className="relative shrink-0">
