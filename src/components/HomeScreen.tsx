@@ -17,17 +17,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   loading,
   errorMessage,
 }) => {
-  const [heroNumber, setHeroNumber] = useState<number>(21);
   const [quickCode, setQuickCode] = useState<string>('');
   const [playerName, setLocalPlayerName] = useState<string>('Duelist');
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
 
   useEffect(() => {
     setLocalPlayerName(getPlayerName());
-    const interval = setInterval(() => {
-      setHeroNumber(Math.floor(Math.random() * 25) + 1);
-    }, 3000);
-    return () => clearInterval(interval);
   }, []);
 
   const handleSaveName = (name: string) => {
@@ -38,151 +33,82 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   };
 
   return (
-    <div className="flex flex-col w-full max-w-md mx-auto gap-space-md select-none pt-2">
-      {/* Live Telemetry Status Pill */}
-      <div className="flex justify-center w-full">
-        <div className="flex items-center gap-space-xs px-space-sm py-1.5 rounded-full bg-surface-container-high/70 backdrop-blur-md shadow-sm border border-outline-variant/30">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-container opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-container" />
-          </span>
-          <span className="font-label-sm text-label-sm text-on-surface uppercase tracking-wider font-bold">
-            Live Supabase Realtime <span className="text-on-surface-variant px-1">•</span> Untimed 1v1 Duels
-          </span>
-        </div>
-      </div>
-
+    <div className="flex flex-col w-full max-w-md mx-auto gap-4 select-none pt-2">
       {/* Error State Banner */}
       {errorMessage && (
-        <div className="w-full relative overflow-hidden rounded-xl bg-surface-container-high/95 backdrop-blur-xl shadow-lg border border-error/50 p-space-sm flex items-start gap-space-sm text-error">
-          <div className="w-8 h-8 rounded-full bg-error/15 flex items-center justify-center shrink-0 mt-0.5">
-            <span className="material-symbols-outlined text-[20px] text-error">error</span>
-          </div>
+        <div className="w-full relative overflow-hidden rounded-xl bg-surface-container-high/95 backdrop-blur-xl shadow-lg border border-error/50 p-3 flex items-start gap-2.5 text-error animate-fadeIn">
+          <span className="material-symbols-outlined text-[20px] text-error mt-0.5">error</span>
           <div className="flex flex-col flex-1 min-w-0 text-left">
-            <span className="font-headline-sm text-headline-sm text-error leading-tight font-bold">
+            <span className="font-headline-sm text-xs font-bold text-error leading-tight">
               Notice
             </span>
-            <span className="font-body-sm text-body-sm text-on-surface-variant mt-0.5 leading-snug">
+            <span className="font-body-sm text-xs text-on-surface-variant mt-0.5 leading-snug">
               {errorMessage}
             </span>
           </div>
         </div>
       )}
 
-      {/* Player Identity Pill */}
-      <div className="flex justify-center w-full">
-        {isEditingName ? (
-          <div className="flex items-center gap-2 bg-surface-container-high/90 p-1.5 rounded-xl border border-primary-container/40">
-            <input
-              type="text"
-              maxLength={15}
-              value={playerName}
-              onChange={e => setLocalPlayerName(e.target.value)}
-              className="bg-transparent text-primary font-headline-sm px-2 py-1 outline-none text-center w-36"
-              autoFocus
-            />
-            <button
-              onClick={() => handleSaveName(playerName)}
-              className="px-3 py-1 rounded-lg bg-primary-container text-on-primary font-bold text-xs"
-            >
-              SAVE
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => {
-              sounds.playTap();
-              setIsEditingName(true);
-            }}
-            className="flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container/80 border border-outline-variant/40 text-on-surface-variant hover:text-primary transition-colors text-xs"
-          >
-            <span>Playing as <strong className="text-primary-fixed">{playerName}</strong></span>
-            <span className="material-symbols-outlined text-[14px]">edit</span>
-          </button>
-        )}
-      </div>
+      {/* Hero Card: Clean & Futuristic */}
+      <div className="relative w-full rounded-2xl bg-surface-container/75 backdrop-blur-2xl p-6 shadow-xl border border-outline-variant/30 overflow-hidden flex flex-col items-center text-center gap-3">
+        {/* Subtle Ambient Glow */}
+        <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-40 h-40 bg-primary-container/15 rounded-full blur-3xl pointer-events-none" />
 
-      {/* Hero Central Glass Card */}
-      <div className="relative w-full rounded-2xl bg-surface-container/70 backdrop-blur-2xl p-space-lg shadow-xl border border-outline-variant/30 overflow-hidden flex flex-col items-center text-center">
-        {/* Top Specular Flare Glow */}
-        <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-48 h-48 bg-primary-container/20 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-10 right-0 w-36 h-36 bg-secondary-container/30 rounded-full blur-2xl pointer-events-none" />
-
-        {/* Animated Kinetic Bingo Sphere Showcase */}
-        <div className="relative w-28 h-28 my-space-xs flex items-center justify-center">
-          {/* Rotating Outer Neon Track SVG */}
-          <svg
-            className="absolute inset-0 w-full h-full animate-spin text-primary-container/40"
-            style={{ animationDuration: '16s' }}
-            viewBox="0 0 100 100"
-          >
-            <circle cx="50" cy="50" fill="none" r="46" stroke="currentColor" strokeDasharray="6 8" strokeWidth="2" />
-          </svg>
-          <svg
-            className="absolute inset-1.5 w-[100px] h-[100px] animate-spin text-secondary/30"
-            style={{ animationDuration: '10s', animationDirection: 'reverse' }}
-            viewBox="0 0 100 100"
-          >
-            <circle cx="50" cy="50" fill="none" r="44" stroke="currentColor" strokeDasharray="14 10" strokeWidth="1.5" />
-          </svg>
-
-          {/* Core Glass Orb with Inset Specular Sheen */}
-          <div className="relative w-20 h-20 rounded-full bg-gradient-to-br from-primary-container via-surface-container-high to-secondary-container flex items-center justify-center shadow-lg p-[2px]">
-            <div className="w-full h-full rounded-full bg-surface-container-lowest/90 backdrop-blur-md flex flex-col items-center justify-center relative overflow-hidden">
-              <div className="absolute top-1 left-2 w-8 h-4 bg-white/25 rounded-full blur-[1px] rotate-[-28deg]" />
-              <span className="font-label-sm text-label-sm text-primary-fixed-dim leading-none tracking-widest font-extrabold uppercase text-[10px]">
-                BALL
-              </span>
-              <span className="font-headline-lg-mobile text-headline-lg-mobile text-on-surface font-extrabold leading-none mt-0.5">
-                {heroNumber}
-              </span>
-            </div>
-          </div>
-
-          {/* Opponent Micro Target Icon Orbiting */}
-          <div className="absolute top-0 right-1 w-7 h-7 rounded-full bg-secondary-container text-secondary flex items-center justify-center shadow-md">
-            <span className="material-symbols-outlined text-[15px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-              swords
-            </span>
-          </div>
+        {/* Central Clean Emblem */}
+        <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-primary-container/25 via-surface-container-high to-secondary-container/25 flex items-center justify-center shadow-lg border border-primary-container/30">
+          <span className="material-symbols-outlined text-[42px] text-primary-container drop-shadow-[0_0_12px_rgba(0,245,212,0.6)]" style={{ fontVariationSettings: "'FILL' 1" }}>
+            grid_4x4
+          </span>
         </div>
 
-        {/* Headline and Descriptor */}
-        <div className="relative z-10 flex flex-col items-center mt-space-xs gap-1">
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary-container/15 text-primary-container font-label-sm text-label-sm border border-primary-container/20">
-            <span className="material-symbols-outlined text-[14px]">all_inclusive</span>
-            NO TIME LIMIT
-          </div>
-          <h1 className="font-headline-xl-mobile text-headline-xl-mobile text-on-surface tracking-tight mt-1 font-extrabold">
-            REAL-TIME 1v1 BINGO
+        <div className="flex flex-col items-center gap-1">
+          <h1 className="font-headline-xl-mobile text-2xl text-on-surface tracking-tight font-black">
+            BINGO DUEL
           </h1>
-          <p className="font-body-md text-body-md text-on-surface-variant max-w-[280px] mt-0.5">
-            Head-to-head on live synchronized boards with no turn timer. Strategize carefully, chain lines, and claim BINGO!
+          <p className="font-body-sm text-xs text-on-surface-variant max-w-[260px]">
+            Real-time 1v1 head-to-head duels on synchronized boards.
           </p>
         </div>
 
-        {/* Micro Match Ticker Ribbon */}
-        <div className="relative z-10 w-full mt-space-md pt-space-xs flex items-center justify-between px-space-xs text-on-surface-variant font-label-sm text-label-sm border-t border-outline-variant/20">
-          <div className="flex items-center gap-1.5">
-            <span className="material-symbols-outlined text-primary-container text-[16px]">all_inclusive</span>
-            <span>Match Clock: <strong className="text-on-surface">No Limit</strong></span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="material-symbols-outlined text-tertiary-fixed-dim text-[16px]">military_tech</span>
-            <span>Ranked Duels</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="material-symbols-outlined text-secondary text-[16px]">public</span>
-            <span>Global P2P</span>
-          </div>
+        {/* Player Identity Badge */}
+        <div className="pt-1">
+          {isEditingName ? (
+            <div className="flex items-center gap-1.5 bg-surface-container-high/90 p-1.5 rounded-xl border border-primary-container/40">
+              <input
+                type="text"
+                maxLength={15}
+                value={playerName}
+                onChange={e => setLocalPlayerName(e.target.value)}
+                className="bg-transparent text-primary-fixed font-bold text-sm px-2 py-1 outline-none text-center w-32"
+                autoFocus
+              />
+              <button
+                onClick={() => handleSaveName(playerName)}
+                className="px-3 py-1 rounded-lg bg-primary-container text-on-primary font-bold text-xs"
+              >
+                SAVE
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                sounds.playTap();
+                setIsEditingName(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/80 border border-outline-variant/30 text-on-surface-variant hover:text-primary transition-colors text-xs font-semibold"
+            >
+              <span>Playing as: <strong className="text-primary-fixed">{playerName}</strong></span>
+              <span className="material-symbols-outlined text-[13px]">edit</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Primary Interactive Thumb-Zone Action Cards */}
-      <div className="flex flex-col w-full gap-space-sm">
-        {/* Action 1: Create Game / Host */}
+      {/* Primary Actions: Clean & Focused */}
+      <div className="flex flex-col w-full gap-3">
+        {/* Host Game Button */}
         <button
-          className="group relative w-full text-left rounded-2xl p-[2px] bg-gradient-to-r from-primary-container via-surface-bright to-primary-fixed-dim shadow-xl active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60 disabled:pointer-events-none"
+          className="relative w-full h-14 rounded-2xl bg-gradient-to-r from-primary-fixed to-primary-container text-on-primary-fixed font-headline-sm text-base font-black shadow-[0_0_24px_rgba(0,245,212,0.4)] active:scale-[0.98] transition-all flex items-center justify-between px-5 disabled:opacity-60 disabled:pointer-events-none hover:brightness-105 cursor-pointer"
           id="btn-create-game"
           type="button"
           disabled={loading}
@@ -191,103 +117,45 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             onCreateGame();
           }}
         >
-          <div className="w-full h-full rounded-[14px] bg-surface-container/90 backdrop-blur-xl p-space-md flex items-center justify-between relative overflow-hidden">
-            <div className="absolute -right-8 -top-8 w-24 h-24 bg-primary-container/15 rounded-full blur-xl pointer-events-none" />
-            <div className="flex items-center gap-space-md min-w-0">
-              <div className="w-12 h-12 rounded-xl bg-primary-container/20 flex items-center justify-center shrink-0 text-primary-container shadow-inner border border-primary-container/30">
-                {loading ? (
-                  <span className="material-symbols-outlined text-[28px] animate-spin text-primary-container">
-                    progress_activity
-                  </span>
-                ) : (
-                  <span className="material-symbols-outlined text-[28px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                    bolt
-                  </span>
-                )}
-              </div>
-              <div className="flex flex-col min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-headline-sm text-headline-sm text-on-surface font-bold tracking-tight">
-                    {loading ? 'Creating Room...' : 'Create Game'}
-                  </span>
-                  <span className="font-label-sm text-label-sm bg-primary-container/20 text-primary-container px-1.5 py-0.5 rounded uppercase font-bold">
-                    HOST
-                  </span>
-                </div>
-                <p className="font-body-sm text-body-sm text-on-surface-variant truncate">
-                  {loading ? 'Setting up real-time 1v1 arena...' : 'Host a room & invite a friend instantly'}
-                </p>
-              </div>
-            </div>
-            <div className="w-9 h-9 rounded-full bg-surface-container-high/80 flex items-center justify-center text-primary-container shrink-0 group-hover:translate-x-1 transition-transform shadow-md">
-              <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
-            </div>
+          <div className="flex items-center gap-3">
+            <span className="material-symbols-outlined text-[24px]">
+              {loading ? 'progress_activity' : 'add_circle'}
+            </span>
+            <span>{loading ? 'Creating Room...' : 'Create Game'}</span>
           </div>
+          <span className="text-[11px] font-black uppercase tracking-wider bg-black/20 px-2 py-0.5 rounded-full">
+            HOST
+          </span>
         </button>
 
-        {/* Action 2: Join Game / Room Code */}
-        <button
-          className="group relative w-full text-left rounded-2xl p-[2px] bg-gradient-to-r from-secondary-container via-surface-bright to-secondary shadow-xl active:scale-[0.98] transition-all cursor-pointer"
-          id="btn-join-game"
-          type="button"
-          disabled={loading}
-          onClick={() => {
-            sounds.playTap();
-            onJoinGame();
-          }}
-        >
-          <div className="w-full h-full rounded-[14px] bg-surface-container/90 backdrop-blur-xl p-space-md flex items-center justify-between relative overflow-hidden">
-            <div className="absolute -right-8 -top-8 w-24 h-24 bg-secondary-container/15 rounded-full blur-xl pointer-events-none" />
-            <div className="flex items-center gap-space-md min-w-0">
-              <div className="w-12 h-12 rounded-xl bg-secondary-container/20 flex items-center justify-center shrink-0 text-secondary shadow-inner border border-secondary-container/30">
-                <span className="material-symbols-outlined text-[28px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  tag
-                </span>
-              </div>
-              <div className="flex flex-col min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-headline-sm text-headline-sm text-on-surface font-bold tracking-tight">
-                    Join Game
-                  </span>
-                  <span className="font-label-sm text-label-sm bg-secondary-container/30 text-secondary-fixed px-1.5 py-0.5 rounded uppercase font-bold">
-                    CODE
-                  </span>
-                </div>
-                <p className="font-body-sm text-body-sm text-on-surface-variant truncate">
-                  Enter 4-letter room code to play
-                </p>
-              </div>
-            </div>
-            <div className="w-9 h-9 rounded-full bg-surface-container-high/80 flex items-center justify-center text-secondary shrink-0 group-hover:translate-x-1 transition-transform shadow-md">
-              <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
-            </div>
+        {/* Join Game Box with Direct 4-Letter Code Input */}
+        <div className="w-full rounded-2xl bg-surface-container/70 backdrop-blur-xl p-3.5 border border-outline-variant/30 flex flex-col gap-2 shadow-md">
+          <span className="font-label-sm text-[11px] text-on-surface-variant uppercase tracking-wider font-bold text-left px-1">
+            Join with Room Code
+          </span>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="ENTER 4-LETTER CODE"
+              maxLength={6}
+              value={quickCode}
+              onChange={e => setQuickCode(e.target.value.toUpperCase())}
+              className="bg-surface-container-high/90 flex-1 h-11 px-3.5 rounded-xl font-headline-sm text-sm tracking-widest text-primary-fixed uppercase placeholder:text-outline-variant/60 outline-none border border-outline-variant/20 focus:border-primary-container transition-colors"
+            />
+            <button
+              disabled={quickCode.length < 3 || loading}
+              onClick={() => {
+                if (quickCode.trim()) {
+                  sounds.playTap();
+                  onJoinGame(quickCode.trim());
+                }
+              }}
+              className="h-11 px-5 rounded-xl bg-surface-container-highest hover:bg-secondary-container hover:text-secondary-fixed text-on-surface font-black text-xs transition-all disabled:opacity-40 disabled:pointer-events-none active:scale-95 border border-outline-variant/20"
+            >
+              JOIN
+            </button>
           </div>
-        </button>
-      </div>
-
-      {/* Quick Direct Code Input */}
-      <div className="w-full rounded-xl bg-surface-container-low/70 backdrop-blur-md p-space-sm border border-outline-variant/30 flex items-center gap-2">
-        <span className="material-symbols-outlined text-outline text-[20px] pl-1">keyboard</span>
-        <input
-          type="text"
-          placeholder="ENTER 4-LETTER CODE..."
-          maxLength={6}
-          value={quickCode}
-          onChange={e => setQuickCode(e.target.value.toUpperCase())}
-          className="bg-transparent flex-1 font-headline-sm text-sm tracking-widest text-primary uppercase placeholder:text-outline-variant/60 outline-none"
-        />
-        <button
-          disabled={quickCode.length < 3 || loading}
-          onClick={() => {
-            if (quickCode.trim()) {
-              sounds.playTap();
-              onJoinGame(quickCode.trim());
-            }
-          }}
-          className="px-4 py-2 rounded-lg bg-surface-container-high hover:bg-primary-container hover:text-on-primary font-bold text-xs transition-all disabled:opacity-40 disabled:pointer-events-none"
-        >
-          JOIN
-        </button>
+        </div>
       </div>
     </div>
   );
