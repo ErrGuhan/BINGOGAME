@@ -1,26 +1,288 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --font-outfit: 'Outfit', sans-serif;
+  --font-jakarta: 'Plus Jakarta Sans', sans-serif;
+
+  /* Stitch Theme Colors */
+  --surface: #0f1222;
+  --surface-dim: #0f1222;
+  --surface-bright: #35384a;
+  --surface-container-lowest: #0a0d1d;
+  --surface-container-low: #181b2b;
+  --surface-container: #1c1f2f;
+  --surface-container-high: #26293a;
+  --surface-container-highest: #313445;
+  --on-surface: #e0e1f8;
+  --on-surface-variant: #b9cac4;
+  --inverse-surface: #e0e1f8;
+  --inverse-on-surface: #2d2f41;
+  --outline: #83948f;
+  --outline-variant: #3a4a46;
+  --surface-tint: #00dfc1;
+
+  --primary: #d7fff3;
+  --on-primary: #00382f;
+  --primary-container: #00f5d4;
+  --on-primary-container: #006c5c;
+  --inverse-primary: #006b5b;
+
+  --secondary: #ddb7ff;
+  --on-secondary: #490080;
+  --secondary-container: #6f00be;
+  --on-secondary-container: #d6a9ff;
+
+  --tertiary: #fff6ea;
+  --on-tertiary: #402d00;
+  --tertiary-container: #ffd57d;
+  --on-tertiary-container: #7a5a00;
+
+  --error: #ffb4ab;
+  --on-error: #690005;
+  --error-container: #93000a;
+  --on-error-container: #ffdad6;
+
+  --primary-fixed: #26fedc;
+  --primary-fixed-dim: #00dfc1;
+  --on-primary-fixed: #00201a;
+  --on-primary-fixed-variant: #005144;
+
+  --secondary-fixed: #f0dbff;
+  --secondary-fixed-dim: #ddb7ff;
+  --on-secondary-fixed: #2c0051;
+  --on-secondary-fixed-variant: #6900b3;
+
+  --tertiary-fixed: #ffdf9f;
+  --tertiary-fixed-dim: #f9bd22;
+  --on-tertiary-fixed: #261a00;
+  --on-tertiary-fixed-variant: #5c4300;
+
+  --background: #0f1222;
+  --on-background: #e0e1f8;
+  --surface-variant: #313445;
 }
 
-@theme inline {
+@theme {
+  --color-surface: var(--surface);
+  --color-surface-dim: var(--surface-dim);
+  --color-surface-bright: var(--surface-bright);
+  --color-surface-container-lowest: var(--surface-container-lowest);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-high: var(--surface-container-high);
+  --color-surface-container-highest: var(--surface-container-highest);
+  --color-on-surface: var(--on-surface);
+  --color-on-surface-variant: var(--on-surface-variant);
+  --color-inverse-surface: var(--inverse-surface);
+  --color-inverse-on-surface: var(--inverse-on-surface);
+  --color-outline: var(--outline);
+  --color-outline-variant: var(--outline-variant);
+  --color-surface-tint: var(--surface-tint);
+
+  --color-primary: var(--primary);
+  --color-on-primary: var(--on-primary);
+  --color-primary-container: var(--primary-container);
+  --color-on-primary-container: var(--on-primary-container);
+  --color-inverse-primary: var(--inverse-primary);
+
+  --color-secondary: var(--secondary);
+  --color-on-secondary: var(--on-secondary);
+  --color-secondary-container: var(--secondary-container);
+  --color-on-secondary-container: var(--on-secondary-container);
+
+  --color-tertiary: var(--tertiary);
+  --color-on-tertiary: var(--on-tertiary);
+  --color-tertiary-container: var(--tertiary-container);
+  --color-on-tertiary-container: var(--on-tertiary-container);
+
+  --color-error: var(--error);
+  --color-on-error: var(--on-error);
+  --color-error-container: var(--error-container);
+  --color-on-error-container: var(--on-error-container);
+
+  --color-primary-fixed: var(--primary-fixed);
+  --color-primary-fixed-dim: var(--primary-fixed-dim);
+  --color-on-primary-fixed: var(--on-primary-fixed);
+  --color-on-primary-fixed-variant: var(--on-primary-fixed-variant);
+
+  --color-secondary-fixed: var(--secondary-fixed);
+  --color-secondary-fixed-dim: var(--secondary-fixed-dim);
+  --color-on-secondary-fixed: var(--on-secondary-fixed);
+  --color-on-secondary-fixed-variant: var(--on-secondary-fixed-variant);
+
+  --color-tertiary-fixed: var(--tertiary-fixed);
+  --color-tertiary-fixed-dim: var(--tertiary-fixed-dim);
+  --color-on-tertiary-fixed: var(--on-tertiary-fixed);
+  --color-on-tertiary-fixed-variant: var(--on-tertiary-fixed-variant);
+
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-on-background: var(--on-background);
+  --color-surface-variant: var(--surface-variant);
+
+  --spacing-space-2xs: 0.25rem;
+  --spacing-space-xs: 0.5rem;
+  --spacing-space-sm: 0.75rem;
+  --spacing-space-md: 1rem;
+  --spacing-space-lg: 1.5rem;
+  --spacing-space-xl: 2rem;
+  --spacing-space-2xl: 3rem;
+  --spacing-board-gap: 0.5rem;
+  --spacing-board-gap-mobile: 0.375rem;
+  --spacing-container-padding-mobile: 1rem;
+  --spacing-container-padding-desktop: 2rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Base resets & layout */
+html, body {
+  width: 100vw;
+  min-height: 100dvh;
+  margin: 0;
+  padding: 0;
+  background-color: #0f1222;
+  color: #e0e1f8;
+  font-family: var(--font-jakarta), system-ui, sans-serif;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+/* Typography tokens matching Stitch */
+.font-headline-xl {
+  font-family: var(--font-outfit), sans-serif;
+  font-size: 40px;
+  line-height: 48px;
+  letter-spacing: -0.02em;
+  font-weight: 800;
+}
+
+.font-headline-xl-mobile {
+  font-family: var(--font-outfit), sans-serif;
+  font-size: 32px;
+  line-height: 40px;
+  letter-spacing: -0.02em;
+  font-weight: 800;
+}
+
+.font-headline-lg {
+  font-family: var(--font-outfit), sans-serif;
+  font-size: 32px;
+  line-height: 40px;
+  letter-spacing: -0.01em;
+  font-weight: 700;
+}
+
+.font-headline-lg-mobile {
+  font-family: var(--font-outfit), sans-serif;
+  font-size: 26px;
+  line-height: 32px;
+  letter-spacing: -0.01em;
+  font-weight: 700;
+}
+
+.font-headline-md {
+  font-family: var(--font-outfit), sans-serif;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
+}
+
+.font-headline-sm {
+  font-family: var(--font-outfit), sans-serif;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.font-body-lg {
+  font-family: var(--font-jakarta), sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+}
+
+.font-body-md {
+  font-family: var(--font-jakarta), sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+
+.font-body-sm {
+  font-family: var(--font-jakarta), sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+}
+
+.font-label-tile {
+  font-family: var(--font-outfit), sans-serif;
+  font-size: 24px;
+  line-height: 28px;
+  letter-spacing: -0.01em;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.font-label-tile-mobile {
+  font-family: var(--font-outfit), sans-serif;
+  font-size: 20px;
+  line-height: 24px;
+  letter-spacing: -0.01em;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.font-label-lg {
+  font-family: var(--font-outfit), sans-serif;
+  font-size: 15px;
+  line-height: 20px;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+}
+
+.font-label-md {
+  font-family: var(--font-outfit), sans-serif;
+  font-size: 13px;
+  line-height: 18px;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.font-label-sm {
+  font-family: var(--font-outfit), sans-serif;
+  font-size: 11px;
+  line-height: 14px;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+/* Material Symbols alignment */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  vertical-align: middle;
+}
+
+/* Pulsing Glow Animation */
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(0, 245, 212, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 28px rgba(0, 245, 212, 0.8);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.animate-pulse-glow {
+  animation: pulseGlow 2s infinite ease-in-out;
 }
