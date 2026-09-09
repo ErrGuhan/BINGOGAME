@@ -129,7 +129,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         </button>
 
         {/* Join Game Box with Direct 4-Letter Code Input */}
-        <div className="w-full rounded-2xl bg-surface-container/70 backdrop-blur-xl p-3.5 border border-outline-variant/30 flex flex-col gap-2 shadow-md">
+        <form
+          onSubmit={e => {
+            e.preventDefault();
+            if (quickCode.trim() && quickCode.length >= 3 && !loading) {
+              sounds.playTap();
+              onJoinGame(quickCode.trim());
+            }
+          }}
+          className="w-full rounded-2xl bg-surface-container/70 backdrop-blur-xl p-3.5 border border-outline-variant/30 flex flex-col gap-2 shadow-md"
+        >
           <span className="font-label-sm text-[11px] text-on-surface-variant uppercase tracking-wider font-bold text-left px-1">
             Join with Room Code
           </span>
@@ -143,19 +152,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               className="bg-surface-container-high/90 flex-1 h-11 px-3.5 rounded-xl font-headline-sm text-sm tracking-widest text-primary-fixed uppercase placeholder:text-outline-variant/60 outline-none border border-outline-variant/20 focus:border-primary-container transition-colors"
             />
             <button
+              type="submit"
               disabled={quickCode.length < 3 || loading}
-              onClick={() => {
-                if (quickCode.trim()) {
-                  sounds.playTap();
-                  onJoinGame(quickCode.trim());
-                }
-              }}
-              className="h-11 px-5 rounded-xl bg-surface-container-highest hover:bg-secondary-container hover:text-secondary-fixed text-on-surface font-black text-xs transition-all disabled:opacity-40 disabled:pointer-events-none active:scale-95 border border-outline-variant/20"
+              className="h-11 px-5 rounded-xl bg-surface-container-highest hover:bg-secondary-container hover:text-secondary-fixed text-on-surface font-black text-xs transition-all disabled:opacity-40 disabled:pointer-events-none active:scale-95 border border-outline-variant/20 cursor-pointer"
             >
               JOIN
             </button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );

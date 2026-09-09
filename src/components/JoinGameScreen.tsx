@@ -112,11 +112,23 @@ export const JoinGameScreen: React.FC<JoinGameScreenProps> = ({
 
       {/* 4-Letter Pin Code Card */}
       <form onSubmit={handleSubmit} className="w-full rounded-2xl bg-surface-container/80 backdrop-blur-xl p-6 shadow-xl border border-outline-variant/30 flex flex-col items-center gap-4">
-        {/* Visual Slots Container */}
-        <div
-          onClick={() => inputRef.current?.focus()}
-          className="flex items-center justify-center gap-3 w-full cursor-pointer py-1"
-        >
+        {/* Visual Slots Container with Direct Transparent Input */}
+        <div className="relative flex items-center justify-center gap-3 w-full py-1">
+          {/* Transparent Native Input Directly Accessible to Mobile Browsers */}
+          <input
+            ref={inputRef}
+            type="text"
+            maxLength={4}
+            value={code}
+            onChange={handleInputChange}
+            className="absolute inset-0 w-full h-full opacity-0 z-20 cursor-pointer caret-transparent"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck="false"
+            autoComplete="off"
+            aria-label="4-letter room code"
+          />
+
           {[0, 1, 2, 3].map(idx => {
             const char = code[idx] || '';
             const isActive = code.length === idx;
@@ -139,19 +151,6 @@ export const JoinGameScreen: React.FC<JoinGameScreenProps> = ({
             );
           })}
         </div>
-
-        {/* Hidden Native Input: Captures hardware and virtual keyboards seamlessly */}
-        <input
-          ref={inputRef}
-          type="text"
-          maxLength={4}
-          value={code}
-          onChange={handleInputChange}
-          className="opacity-0 absolute -z-10 pointer-events-none"
-          autoCapitalize="characters"
-          autoCorrect="off"
-          spellCheck="false"
-        />
 
         {/* Quick Paste Button */}
         <button

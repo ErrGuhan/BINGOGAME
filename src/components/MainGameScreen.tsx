@@ -168,17 +168,6 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
     }
   };
 
-  const handleClaimBingo = () => {
-    sounds.playTap();
-    if (myLines >= 5) {
-      sounds.playVictory();
-      alert('⚡ BINGO! Server confirmed 5 lines completed! Victory is yours!');
-    } else {
-      sounds.playAlert();
-      alert(`⚠️ You have ${myLines}/5 lines completed. Keep calling numbers to reach 5 lines for BINGO!`);
-    }
-  };
-
   const latestCall = calledNumbers.length > 0 ? calledNumbers[calledNumbers.length - 1] : null;
   const historyCalls = calledNumbers.slice(0, -1).reverse();
 
@@ -339,46 +328,30 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
 
       {/* 4. Streamlined Fast Action Bar */}
       <section className="w-full flex flex-col gap-2 pt-0.5">
-        {/* Primary Call & Claim Grid */}
-        <div className="grid grid-cols-4 gap-2">
-          <button
-            type="button"
-            disabled={!isMyTurn || selectedNumber === null || isCalling || loading}
-            onClick={handleExecuteCall}
-            className={`col-span-3 h-13 py-3 rounded-2xl font-headline-sm text-sm sm:text-base font-black flex items-center justify-center gap-2 transition-all ${
-              isMyTurn && selectedNumber !== null && !isCalling && !loading
-                ? 'bg-gradient-to-r from-primary-fixed to-primary-container text-on-primary-fixed shadow-[0_0_24px_rgba(0,245,212,0.6)] active:scale-[0.98] cursor-pointer hover:brightness-110'
-                : 'bg-surface-container-high text-on-surface-variant/40 cursor-not-allowed border border-outline-variant/20'
-            }`}
-          >
-            <span className="material-symbols-outlined text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-              bolt
-            </span>
-            <span>
-              {isCalling
-                ? 'Calling...'
-                : !isMyTurn
-                ? 'Opponent Calling...'
-                : selectedNumber
-                ? `CALL NUMBER #${selectedNumber}`
-                : 'TAP A NUMBER ON BOARD'}
-            </span>
-          </button>
-
-          {/* Claim BINGO Button */}
-          <button
-            type="button"
-            onClick={handleClaimBingo}
-            className={`col-span-1 h-13 py-2 rounded-2xl flex flex-col items-center justify-center active:scale-95 transition-all ${
-              myLines >= 5
-                ? 'bg-gradient-to-r from-secondary to-secondary-container text-on-secondary shadow-[0_0_24px_rgba(168,85,247,0.9)] animate-bounce font-black'
-                : 'bg-surface-container-high text-on-surface-variant/60 border border-outline-variant/20 hover:text-secondary'
-            }`}
-          >
-            <span className="text-[9px] font-bold uppercase tracking-wider leading-none">CLAIM</span>
-            <span className="text-xs font-black tracking-wider leading-tight">BINGO!</span>
-          </button>
-        </div>
+        {/* Primary Call Action Button */}
+        <button
+          type="button"
+          disabled={!isMyTurn || selectedNumber === null || isCalling || loading}
+          onClick={handleExecuteCall}
+          className={`w-full h-14 rounded-2xl font-headline-sm text-sm sm:text-base font-black flex items-center justify-center gap-2 transition-all ${
+            isMyTurn && selectedNumber !== null && !isCalling && !loading
+              ? 'bg-gradient-to-r from-primary-fixed to-primary-container text-on-primary-fixed shadow-[0_0_24px_rgba(0,245,212,0.6)] active:scale-[0.98] cursor-pointer hover:brightness-110'
+              : 'bg-surface-container-high text-on-surface-variant/40 cursor-not-allowed border border-outline-variant/20'
+          }`}
+        >
+          <span className="material-symbols-outlined text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+            bolt
+          </span>
+          <span>
+            {isCalling
+              ? 'Calling...'
+              : !isMyTurn
+              ? 'Opponent Calling...'
+              : selectedNumber
+              ? `CALL NUMBER #${selectedNumber}`
+              : 'TAP A NUMBER ON BOARD'}
+          </span>
+        </button>
 
         {/* Selection Hint & Optional Number Pad Toggle */}
         <div className="flex items-center justify-between px-1 text-xs">

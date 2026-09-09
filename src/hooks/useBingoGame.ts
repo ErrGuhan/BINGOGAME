@@ -59,7 +59,11 @@ export function useBingoGame(initialRoomCode?: string) {
     if (!snapshot) return;
     setGame(snapshot.game);
     if (snapshot.player) {
-      setPlayer(snapshot.player);
+      const p = snapshot.player;
+      setPlayer(prev => ({
+        ...p,
+        board: p.board || prev?.board || null,
+      }));
     }
     setP1(snapshot.p1);
     setP2(snapshot.p2);
@@ -467,34 +471,36 @@ export function useBingoGame(initialRoomCode?: string) {
       setActiveRoomCode(cleanCode);
 
       // Broadcast to Room that Player 2 joined so Host receives immediate notification
-      const joinChannel = supabase.channel(`room:${cleanCode}`);
-      joinChannel.subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          joinChannel.send({
-            type: 'broadcast',
-            event: 'PLAYER_JOINED',
-            payload: {
-              player: {
-                id: data.player_id,
-                session_id: sessionId,
-                display_name: name,
-                player_number: data.player_number || 2,
-                board: null,
-                is_ready: false,
-                connected: true,
-                lines_completed: 0,
-                last_seen_at: new Date().toISOString(),
+      if (!data.is_reconnect && data.player_number === 2) {
+        const joinChannel = supabase.channel(`room:${cleanCode}`);
+        joinChannel.subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            joinChannel.send({
+              type: 'broadcast',
+              event: 'PLAYER_JOINED',
+              payload: {
+                player: {
+                  id: data.player_id,
+                  session_id: sessionId,
+                  display_name: name,
+                  player_number: 2,
+                  board: null,
+                  is_ready: false,
+                  connected: true,
+                  lines_completed: 0,
+                  last_seen_at: new Date().toISOString(),
+                },
               },
-            },
-          }).then(() => {
-            setTimeout(() => {
+            }).then(() => {
+              setTimeout(() => {
+                supabase.removeChannel(joinChannel);
+              }, 1000);
+            }).catch(() => {
               supabase.removeChannel(joinChannel);
-            }, 1000);
-          }).catch(() => {
-            supabase.removeChannel(joinChannel);
-          });
-        }
-      });
+            });
+          }
+        });
+      }
 
       await syncGameState(data.game_id);
       return data;
@@ -514,6 +520,14 @@ export function useBingoGame(initialRoomCode?: string) {
     setError(null);
     const sessionId = getSession();
 
+    // 1. Immediately store board in local state to eliminate race condition on game start
+    setPlayer(prev => prev ? { ...prev, board, is_ready: true } : null);
+    if (player?.player_number === 1) {
+      setP1(prev => prev ? { ...prev, board, is_ready: true } : null);
+    } else if (player?.player_number === 2) {
+      setP2(prev => prev ? { ...prev, board, is_ready: true } : null);
+    }
+
     try {
       const supabase = getSupabase();
       if (!supabase || !isSupabaseConfigured()) {
@@ -531,6 +545,14 @@ export function useBingoGame(initialRoomCode?: string) {
           throw new Error('Supabase functions not yet installed. Please run supabase/schema.sql in your Supabase SQL Editor!');
         }
         throw error;
+      }
+
+      if (data?.all_ready) {
+        setGame(prev => prev ? {
+          ...prev,
+          status: 'playing',
+          current_turn_player_id: data.current_turn_player_id,
+        } : null);
       }
 
       channelRef.current?.send({
@@ -552,7 +574,7 @@ export function useBingoGame(initialRoomCode?: string) {
     } finally {
       setLoading(false);
     }
-  }, [game?.id, getSession, player?.id, syncGameState]);
+  }, [game?.id, getSession, player?.id, player?.player_number, syncGameState]);
 
   // ACTION: Call Number (Supabase Server-Side Strict Alternating Turns & Win Detection)
   const callNumber = useCallback(async (number: number) => {

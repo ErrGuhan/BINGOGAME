@@ -84,7 +84,7 @@ export default function GameRoomPage({ params }: { params: Promise<{ code: strin
         )}
 
         {/* Board Setup State */}
-        {(!player?.is_ready || game?.status === 'ready' || game?.status === 'waiting') && (
+        {game?.status !== 'playing' && game?.status !== 'completed' && (
           <BoardSetupScreen
             initialAutoFill={true}
             onConfirmBoard={handleBoardConfirmed}
@@ -96,19 +96,26 @@ export default function GameRoomPage({ params }: { params: Promise<{ code: strin
         )}
 
         {/* Main Game State */}
-        {game?.status === 'playing' && player?.board && (
-          <MainGameScreen
-            board={player.board}
-            calledNumbers={calledNumbers}
-            isMyTurn={isMyTurn}
-            myLines={myLines}
-            opponentLines={opponentLines}
-            playerName={player.display_name}
-            opponentName={opponentName}
-            onCallNumber={callNumber}
-            loading={loading}
-            optimisticCalled={optimisticCalled}
-          />
+        {game?.status === 'playing' && (
+          player?.board ? (
+            <MainGameScreen
+              board={player.board}
+              calledNumbers={calledNumbers}
+              isMyTurn={isMyTurn}
+              myLines={myLines}
+              opponentLines={opponentLines}
+              playerName={player.display_name}
+              opponentName={opponentName}
+              onCallNumber={callNumber}
+              loading={loading}
+              optimisticCalled={optimisticCalled}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center p-12 text-center">
+              <span className="w-10 h-10 border-4 border-primary-container border-t-transparent rounded-full animate-spin mb-4" />
+              <p className="text-on-surface-variant font-bold text-sm">Entering Duel Arena...</p>
+            </div>
+          )
         )}
 
         {/* Victory State */}

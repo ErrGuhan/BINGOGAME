@@ -50,10 +50,15 @@ export default function App() {
   React.useEffect(() => {
     const savedRoom = getActiveRoomCode();
     if (savedRoom) {
-      joinGame(savedRoom).catch((err) => {
-        console.warn('Auto-reconnect failed for saved room:', savedRoom, err);
-        clearActiveRoomCode();
-      });
+      joinGame(savedRoom)
+        .then(() => {
+          // Successfully restored room
+        })
+        .catch((err) => {
+          console.warn('Auto-reconnect failed for saved room:', savedRoom, err);
+          clearActiveRoomCode();
+          resetGame(); // Ensure home screen is completely clean without a phantom error banner
+        });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -67,8 +72,8 @@ export default function App() {
         setScreen('create');
       }
     } else if (game.status === 'ready') {
-      // If player doesn't have a board submitted yet, go to setup
-      if (!player?.is_ready && screen !== 'setup') {
+      // Auto-navigate challenger to setup if they are not already on setup
+      if (player?.player_number === 2 && !player?.is_ready && screen !== 'setup') {
         setScreen('setup');
       }
     } else if (game.status === 'playing') {
@@ -76,7 +81,7 @@ export default function App() {
     } else if (game.status === 'completed') {
       setScreen('victory');
     }
-  }, [game?.status, player?.is_ready, screen]);
+  }, [game?.status, player?.is_ready, player?.player_number, screen]);
 
   // Handle Home -> Create Game
   const handleStartCreate = async () => {
@@ -219,19 +224,26 @@ export default function App() {
           />
         )}
 
-        {screen === 'game' && player?.board && (
-          <MainGameScreen
-            board={player.board}
-            calledNumbers={calledNumbers}
-            isMyTurn={isMyTurn}
-            myLines={myLines}
-            opponentLines={opponentLines}
-            playerName={player.display_name}
-            opponentName={opponentName}
-            onCallNumber={callNumber}
-            loading={loading}
-            optimisticCalled={optimisticCalled}
-          />
+        {screen === 'game' && (
+          player?.board ? (
+            <MainGameScreen
+              board={player.board}
+              calledNumbers={calledNumbers}
+              isMyTurn={isMyTurn}
+              myLines={myLines}
+              opponentLines={opponentLines}
+              playerName={player.display_name}
+              opponentName={opponentName}
+              onCallNumber={callNumber}
+              loading={loading}
+              optimisticCalled={optimisticCalled}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center p-12 text-center">
+              <span className="w-10 h-10 border-4 border-primary-container border-t-transparent rounded-full animate-spin mb-4" />
+              <p className="text-on-surface-variant font-bold text-sm">Entering Duel Arena...</p>
+            </div>
+          )
         )}
 
         {screen === 'victory' && (
