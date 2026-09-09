@@ -70,11 +70,26 @@ export const JoinGameScreen: React.FC<JoinGameScreenProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [code]);
 
-  const keysRow1 = ['1', '2', '3', '4', '5'];
-  const keysRow2 = ['6', '7', '8', '9', '0'];
-  const keysLetters1 = ['A', 'B', 'D', 'E', 'H', 'K'];
-  const keysLetters2 = ['M', 'P', 'Q', 'R', 'T', 'W'];
-  const keysLetters3 = ['X', 'Y', 'Z', 'V'];
+  const handlePaste = async () => {
+    sounds.playTap();
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        const clean = text.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, maxChars);
+        if (clean.length > 0) {
+          setCode(clean.split(''));
+          sounds.playDraft(580);
+        }
+      }
+    } catch {
+      // Clipboard access denied or unsupported
+    }
+  };
+
+  const keysNumbers = ['2', '3', '4', '5', '6', '7', '8', '9'];
+  const keysRowA = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+  const keysRowB = ['J', 'K', 'L', 'M', 'N', 'P', 'Q', 'R'];
+  const keysRowC = ['S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
 
   return (
     <div className="flex flex-col w-full max-w-md mx-auto px-space-xs py-space-sm space-y-space-md select-none">
@@ -161,83 +176,99 @@ export const JoinGameScreen: React.FC<JoinGameScreenProps> = ({
             );
           })}
         </div>
-        <span className="font-label-sm text-label-sm text-on-surface-variant/70 mt-space-xs uppercase tracking-widest">
-          Tap Keypad Below
-        </span>
+        
+        {/* Fast Action Paste Link */}
+        <div className="flex items-center gap-2 mt-2">
+          <span className="font-label-sm text-label-sm text-on-surface-variant/70 uppercase tracking-widest text-[10px]">
+            Tap Keypad or
+          </span>
+          <button
+            type="button"
+            onClick={handlePaste}
+            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-surface-container-high/90 hover:bg-primary-container/20 text-primary-fixed text-[11px] font-bold border border-primary-fixed/25 active:scale-95 transition-all shadow-sm"
+          >
+            <span className="material-symbols-outlined text-[13px]">content_paste</span>
+            <span>Paste Code</span>
+          </button>
+        </div>
       </div>
 
-      {/* Custom Mobile Frosted Glass Keypad */}
-      <div className="w-full rounded-2xl bg-surface-container-lowest/60 backdrop-blur-2xl p-space-sm shadow-[inset_0_1px_1px_rgba(255,255,255,0.06),0_12px_36px_rgba(0,0,0,0.4)] border border-outline-variant/20 flex flex-col gap-2">
-        {/* Numeric Top Deck */}
-        <div className="grid grid-cols-5 gap-1.5">
-          {keysRow1.map(k => (
+      {/* Custom Mobile Frosted Glass Keypad (Complete 32 Character Matrix) */}
+      <div className="w-full rounded-2xl bg-surface-container-lowest/60 backdrop-blur-2xl p-2.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.06),0_12px_36px_rgba(0,0,0,0.4)] border border-outline-variant/20 flex flex-col gap-1.5">
+        {/* Row 1: Numbers 2-9 */}
+        <div className="grid grid-cols-8 gap-1">
+          {keysNumbers.map(k => (
             <button
               key={k}
               type="button"
               onClick={() => handleKeyPress(k)}
-              className="key-btn h-11 rounded-lg bg-surface-container-high/80 text-on-surface font-headline-sm text-headline-sm flex items-center justify-center active:scale-95 active:bg-primary-container active:text-on-primary transition-all shadow-sm border border-outline-variant/20 font-bold"
-            >
-              {k}
-            </button>
-          ))}
-        </div>
-        <div className="grid grid-cols-5 gap-1.5">
-          {keysRow2.map(k => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => handleKeyPress(k)}
-              className="key-btn h-11 rounded-lg bg-surface-container-high/80 text-on-surface font-headline-sm text-headline-sm flex items-center justify-center active:scale-95 active:bg-primary-container active:text-on-primary transition-all shadow-sm border border-outline-variant/20 font-bold"
+              className="key-btn h-10 rounded-lg bg-surface-container-high/90 text-primary-fixed font-headline-sm text-headline-sm text-xs flex items-center justify-center active:scale-95 active:bg-primary-container active:text-on-primary transition-all shadow-sm border border-outline-variant/20 font-extrabold"
             >
               {k}
             </button>
           ))}
         </div>
 
-        {/* Letters Matrix */}
-        <div className="grid grid-cols-6 gap-1.5 pt-1">
-          {keysLetters1.map(k => (
+        {/* Row 2: Letters A-H */}
+        <div className="grid grid-cols-8 gap-1">
+          {keysRowA.map(k => (
             <button
               key={k}
               type="button"
               onClick={() => handleKeyPress(k)}
-              className="key-btn h-10 rounded-lg bg-surface-container/70 text-on-surface font-label-lg text-label-lg flex items-center justify-center active:scale-95 active:bg-secondary-container active:text-on-secondary transition-all border border-outline-variant/15 font-bold"
+              className="key-btn h-10 rounded-lg bg-surface-container/80 text-on-surface font-label-lg text-xs flex items-center justify-center active:scale-95 active:bg-secondary-container active:text-on-secondary transition-all border border-outline-variant/15 font-bold"
             >
               {k}
             </button>
           ))}
         </div>
-        <div className="grid grid-cols-6 gap-1.5">
-          {keysLetters2.map(k => (
+
+        {/* Row 3: Letters J-R */}
+        <div className="grid grid-cols-8 gap-1">
+          {keysRowB.map(k => (
             <button
               key={k}
               type="button"
               onClick={() => handleKeyPress(k)}
-              className="key-btn h-10 rounded-lg bg-surface-container/70 text-on-surface font-label-lg text-label-lg flex items-center justify-center active:scale-95 active:bg-secondary-container active:text-on-secondary transition-all border border-outline-variant/15 font-bold"
+              className="key-btn h-10 rounded-lg bg-surface-container/80 text-on-surface font-label-lg text-xs flex items-center justify-center active:scale-95 active:bg-secondary-container active:text-on-secondary transition-all border border-outline-variant/15 font-bold"
             >
               {k}
             </button>
           ))}
         </div>
-        <div className="grid grid-cols-6 gap-1.5">
-          {keysLetters3.map(k => (
+
+        {/* Row 4: Letters S-Z */}
+        <div className="grid grid-cols-8 gap-1">
+          {keysRowC.map(k => (
             <button
               key={k}
               type="button"
               onClick={() => handleKeyPress(k)}
-              className="key-btn h-10 rounded-lg bg-surface-container/70 text-on-surface font-label-lg text-label-lg flex items-center justify-center active:scale-95 active:bg-secondary-container active:text-on-secondary transition-all border border-outline-variant/15 font-bold"
+              className="key-btn h-10 rounded-lg bg-surface-container/80 text-on-surface font-label-lg text-xs flex items-center justify-center active:scale-95 active:bg-secondary-container active:text-on-secondary transition-all border border-outline-variant/15 font-bold"
             >
               {k}
             </button>
           ))}
-          {/* Backspace span-2 */}
+        </div>
+
+        {/* Row 5: Action Deck (Paste + Delete) */}
+        <div className="grid grid-cols-8 gap-1 pt-0.5">
+          <button
+            type="button"
+            onClick={handlePaste}
+            className="col-span-4 h-10 rounded-lg bg-surface-container-high/80 text-on-surface hover:text-primary-fixed flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow-sm border border-outline-variant/20 font-bold text-xs"
+          >
+            <span className="material-symbols-outlined text-[16px] text-primary-container">content_paste</span>
+            <span>Paste Clipboard</span>
+          </button>
           <button
             aria-label="Delete character"
             type="button"
             onClick={handleBackspace}
-            className="col-span-2 h-10 rounded-lg bg-surface-container-high/90 text-error flex items-center justify-center active:scale-95 active:bg-error active:text-on-error transition-all shadow-sm border border-error/30"
+            className="col-span-4 h-10 rounded-lg bg-surface-container-high/90 text-error flex items-center justify-center gap-1.5 active:scale-95 active:bg-error active:text-on-error transition-all shadow-sm border border-error/30 font-bold text-xs"
           >
-            <span className="material-symbols-outlined text-[20px]">backspace</span>
+            <span className="material-symbols-outlined text-[18px]">backspace</span>
+            <span>Delete</span>
           </button>
         </div>
       </div>

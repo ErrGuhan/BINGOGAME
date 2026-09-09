@@ -90,6 +90,8 @@ export default function GameRoomPage({ params }: { params: Promise<{ code: strin
             onConfirmBoard={handleBoardConfirmed}
             onBack={() => router.push('/')}
             loading={loading}
+            isReady={Boolean(player?.is_ready)}
+            opponentName={opponentName}
           />
         )}
 

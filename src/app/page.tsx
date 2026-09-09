@@ -189,6 +189,8 @@ export default function App() {
             onConfirmBoard={handleBoardConfirmed}
             onBack={() => setScreen(player?.player_number === 1 ? 'create' : 'home')}
             loading={loading}
+            isReady={Boolean(player?.is_ready)}
+            opponentName={opponentName}
           />
         )}
 

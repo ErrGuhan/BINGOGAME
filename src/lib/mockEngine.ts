@@ -223,6 +223,7 @@ export function mockSetPlayerBoard(gameId: string, sessionId: string, board: num
     is_ready: true,
     all_ready: allReady,
     game_status: store.game.status,
+    current_turn_player_id: store.game.current_turn_player_id,
   };
 }
 

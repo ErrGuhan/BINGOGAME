@@ -230,7 +230,7 @@ DECLARE
     d1_complete BOOLEAN;
     d2_complete BOOLEAN;
 BEGIN
-    IF p_board IS NULL OR jsonb_array_length(p_board) <> 25 THEN
+    IF p_board IS NULL OR jsonb_array_length(p_board) <> 25 OR p_called_numbers IS NULL OR cardinality(p_called_numbers) < 5 THEN
         RETURN 0;
     END IF;
 
@@ -362,7 +362,8 @@ BEGIN
         'success', TRUE,
         'is_ready', TRUE,
         'all_ready', v_all_ready,
-        'game_status', CASE WHEN v_all_ready THEN 'playing' ELSE v_game.status END
+        'game_status', CASE WHEN v_all_ready THEN 'playing' ELSE v_game.status END,
+        'current_turn_player_id', CASE WHEN v_all_ready THEN v_p1_id ELSE NULL END
     );
 END;
 $$;

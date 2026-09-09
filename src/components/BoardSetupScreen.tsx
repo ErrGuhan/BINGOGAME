@@ -9,6 +9,8 @@ interface BoardSetupScreenProps {
   onConfirmBoard: (board: number[]) => void;
   onBack: () => void;
   loading: boolean;
+  isReady?: boolean;
+  opponentName?: string;
 }
 
 export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
@@ -16,6 +18,8 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
   onConfirmBoard,
   onBack,
   loading,
+  isReady = false,
+  opponentName = 'Opponent',
 }) => {
   const [board, setBoard] = useState<(number | null)[]>(Array(25).fill(null));
   const [activeIndex, setActiveIndex] = useState<number>(0);
@@ -51,6 +55,7 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
   };
 
   const handleCellClick = (idx: number) => {
+    if (isReady) return;
     sounds.playTap();
     if (board[idx] !== null) {
       // Remove number from this slot
@@ -66,7 +71,7 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
   };
 
   const handleTrayChipClick = (num: number) => {
-    if (usedNumbers.has(num)) return;
+    if (isReady || usedNumbers.has(num)) return;
 
     let target = activeIndex;
     if (target === -1 || board[target] !== null) {
@@ -244,46 +249,70 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
       </div>
 
       {/* Bottom Thumb Zone Actions */}
-      <div className="grid grid-cols-12 gap-space-xs pt-space-2xs">
-        {/* Clear Board */}
-        <button
-          type="button"
-          onClick={handleClear}
-          className="col-span-3 flex items-center justify-center gap-1 h-12 rounded-lg bg-surface-container-high text-on-surface hover:text-error hover:bg-surface-bright active:scale-95 transition-all shadow-md border border-outline-variant/30 font-bold"
-        >
-          <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
-          <span className="font-label-md text-label-md">Clear</span>
-        </button>
+      {isReady ? (
+        <div className="w-full rounded-xl bg-surface-container-high/90 backdrop-blur-xl p-3.5 shadow-xl border border-primary-container/40 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="relative flex items-center justify-center w-10 h-10 rounded-full bg-primary-container/20 shrink-0">
+              <span className="w-3 h-3 rounded-full bg-primary-container animate-ping absolute" />
+              <span className="w-4 h-4 rounded-full bg-primary-container shadow-[0_0_10px_#00f5d4]" />
+            </div>
+            <div className="flex flex-col text-left">
+              <span className="font-headline-sm text-headline-sm text-primary-fixed font-bold text-sm">
+                Board Locked &amp; Ready!
+              </span>
+              <span className="font-body-sm text-body-sm text-on-surface-variant text-xs">
+                Waiting for {opponentName} to lock board...
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 pr-1">
+            <span className="w-2 h-2 rounded-full bg-primary-container animate-bounce" />
+            <span className="w-2 h-2 rounded-full bg-primary-container animate-bounce [animation-delay:150ms]" />
+            <span className="w-2 h-2 rounded-full bg-primary-container animate-bounce [animation-delay:300ms]" />
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-12 gap-space-xs pt-space-2xs">
+          {/* Clear Board */}
+          <button
+            type="button"
+            onClick={handleClear}
+            className="col-span-3 flex items-center justify-center gap-1 h-12 rounded-lg bg-surface-container-high text-on-surface hover:text-error hover:bg-surface-bright active:scale-95 transition-all shadow-md border border-outline-variant/30 font-bold"
+          >
+            <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
+            <span className="font-label-md text-label-md">Clear</span>
+          </button>
 
-        {/* Randomize Auto */}
-        <button
-          type="button"
-          onClick={handleAutoFill}
-          className="col-span-3 flex items-center justify-center gap-1 h-12 rounded-lg bg-surface-container-high text-on-surface hover:text-secondary-fixed-dim hover:bg-surface-bright active:scale-95 transition-all shadow-md border border-outline-variant/30 font-bold"
-        >
-          <span className="material-symbols-outlined text-[18px]">casino</span>
-          <span className="font-label-md text-label-md">Auto</span>
-        </button>
+          {/* Randomize Auto */}
+          <button
+            type="button"
+            onClick={handleAutoFill}
+            className="col-span-3 flex items-center justify-center gap-1 h-12 rounded-lg bg-surface-container-high text-on-surface hover:text-secondary-fixed-dim hover:bg-surface-bright active:scale-95 transition-all shadow-md border border-outline-variant/30 font-bold"
+          >
+            <span className="material-symbols-outlined text-[18px]">casino</span>
+            <span className="font-label-md text-label-md">Auto</span>
+          </button>
 
-        {/* Confirm Board Neon Primary CTA */}
-        <button
-          type="button"
-          disabled={!isComplete || loading}
-          onClick={handleConfirm}
-          className={`col-span-6 flex items-center justify-center gap-2 h-12 rounded-lg font-headline-sm text-headline-sm transition-all shadow-md font-extrabold ${
-            isComplete && !loading
-              ? 'bg-gradient-to-r from-primary-fixed to-primary-container text-on-primary-fixed shadow-[0_0_20px_rgba(0,245,212,0.5)] active:scale-[0.98] cursor-pointer'
-              : 'bg-surface-container-highest text-on-surface-variant opacity-60 cursor-not-allowed'
-          }`}
-        >
-          <span className="material-symbols-outlined text-[20px]">
-            {isComplete ? 'check_circle' : 'lock_clock'}
-          </span>
-          <span>
-            {loading ? 'Locking...' : isComplete ? 'Lock & Duel' : `Confirm (${placedCount}/25)`}
-          </span>
-        </button>
-      </div>
+          {/* Confirm Board Neon Primary CTA */}
+          <button
+            type="button"
+            disabled={!isComplete || loading}
+            onClick={handleConfirm}
+            className={`col-span-6 flex items-center justify-center gap-2 h-12 rounded-lg font-headline-sm text-headline-sm transition-all shadow-md font-extrabold ${
+              isComplete && !loading
+                ? 'bg-gradient-to-r from-primary-fixed to-primary-container text-on-primary-fixed shadow-[0_0_20px_rgba(0,245,212,0.5)] active:scale-[0.98] cursor-pointer'
+                : 'bg-surface-container-highest text-on-surface-variant opacity-60 cursor-not-allowed'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[20px]">
+              {isComplete ? 'check_circle' : 'lock_clock'}
+            </span>
+            <span>
+              {loading ? 'Locking...' : isComplete ? 'Lock & Duel' : `Confirm (${placedCount}/25)`}
+            </span>
+          </button>
+        </div>
+      )}
 
       {/* Mini Toast Notification */}
       {toastMessage && (
