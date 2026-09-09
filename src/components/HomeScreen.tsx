@@ -8,12 +8,14 @@ interface HomeScreenProps {
   onCreateGame: () => void;
   onJoinGame: (code?: string) => void;
   loading: boolean;
+  errorMessage?: string | null;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
   onCreateGame,
   onJoinGame,
   loading,
+  errorMessage,
 }) => {
   const [heroNumber, setHeroNumber] = useState<number>(21);
   const [quickCode, setQuickCode] = useState<string>('');
@@ -49,6 +51,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </span>
         </div>
       </div>
+
+      {/* Error State Banner */}
+      {errorMessage && (
+        <div className="w-full relative overflow-hidden rounded-xl bg-surface-container-high/95 backdrop-blur-xl shadow-lg border border-error/50 p-space-sm flex items-start gap-space-sm text-error">
+          <div className="w-8 h-8 rounded-full bg-error/15 flex items-center justify-center shrink-0 mt-0.5">
+            <span className="material-symbols-outlined text-[20px] text-error">error</span>
+          </div>
+          <div className="flex flex-col flex-1 min-w-0 text-left">
+            <span className="font-headline-sm text-headline-sm text-error leading-tight font-bold">
+              Notice
+            </span>
+            <span className="font-body-sm text-body-sm text-on-surface-variant mt-0.5 leading-snug">
+              {errorMessage}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Player Identity Pill */}
       <div className="flex justify-center w-full">
@@ -163,7 +182,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       <div className="flex flex-col w-full gap-space-sm">
         {/* Action 1: Create Game / Host */}
         <button
-          className="group relative w-full text-left rounded-2xl p-[2px] bg-gradient-to-r from-primary-container via-surface-bright to-primary-fixed-dim shadow-xl active:scale-[0.98] transition-all cursor-pointer"
+          className="group relative w-full text-left rounded-2xl p-[2px] bg-gradient-to-r from-primary-container via-surface-bright to-primary-fixed-dim shadow-xl active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60 disabled:pointer-events-none"
           id="btn-create-game"
           type="button"
           disabled={loading}
@@ -176,21 +195,27 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             <div className="absolute -right-8 -top-8 w-24 h-24 bg-primary-container/15 rounded-full blur-xl pointer-events-none" />
             <div className="flex items-center gap-space-md min-w-0">
               <div className="w-12 h-12 rounded-xl bg-primary-container/20 flex items-center justify-center shrink-0 text-primary-container shadow-inner border border-primary-container/30">
-                <span className="material-symbols-outlined text-[28px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  bolt
-                </span>
+                {loading ? (
+                  <span className="material-symbols-outlined text-[28px] animate-spin text-primary-container">
+                    progress_activity
+                  </span>
+                ) : (
+                  <span className="material-symbols-outlined text-[28px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                    bolt
+                  </span>
+                )}
               </div>
               <div className="flex flex-col min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="font-headline-sm text-headline-sm text-on-surface font-bold tracking-tight">
-                    Create Game
+                    {loading ? 'Creating Room...' : 'Create Game'}
                   </span>
                   <span className="font-label-sm text-label-sm bg-primary-container/20 text-primary-container px-1.5 py-0.5 rounded uppercase font-bold">
                     HOST
                   </span>
                 </div>
                 <p className="font-body-sm text-body-sm text-on-surface-variant truncate">
-                  Host a room &amp; invite a friend instantly
+                  {loading ? 'Setting up real-time 1v1 arena...' : 'Host a room & invite a friend instantly'}
                 </p>
               </div>
             </div>

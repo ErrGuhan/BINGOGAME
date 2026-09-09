@@ -27,7 +27,15 @@ export function useBingoGame(initialRoomCode?: string) {
   const reconnectAttemptRef = useRef<number>(0);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize session ID
+  // Reliable session getter
+  const getSession = useCallback(() => {
+    if (!sessionIdRef.current) {
+      sessionIdRef.current = getSessionId();
+    }
+    return sessionIdRef.current;
+  }, []);
+
+  // Initialize session ID on mount
   useEffect(() => {
     sessionIdRef.current = getSessionId();
   }, []);
@@ -50,7 +58,9 @@ export function useBingoGame(initialRoomCode?: string) {
   const applySnapshot = useCallback((snapshot: GameStateSnapshot | null) => {
     if (!snapshot) return;
     setGame(snapshot.game);
-    setPlayer(snapshot.player);
+    if (snapshot.player) {
+      setPlayer(snapshot.player);
+    }
     setP1(snapshot.p1);
     setP2(snapshot.p2);
     setCalledNumbers(snapshot.called_numbers || []);
@@ -72,7 +82,7 @@ export function useBingoGame(initialRoomCode?: string) {
   // Fetch full game state from source of truth in Supabase
   const syncGameState = useCallback(async (gameId: string) => {
     if (!gameId) return;
-    const sessionId = sessionIdRef.current;
+    const sessionId = getSession();
     const supabase = getSupabase();
 
     if (!supabase || !isSupabaseConfigured()) {
@@ -92,7 +102,7 @@ export function useBingoGame(initialRoomCode?: string) {
     } catch (err: unknown) {
       console.error('Failed to sync game state:', err);
     }
-  }, [applySnapshot]);
+  }, [applySnapshot, getSession]);
 
   // Handle Realtime incoming events
   const handleRealtimeEvent = useCallback((event: string, payload: unknown) => {
@@ -338,12 +348,12 @@ export function useBingoGame(initialRoomCode?: string) {
   }, [isOpponentDisconnected, game?.status]);
 
   // ACTION: Create Game (Supabase Server-Side RPC)
-  const createGame = async (displayName?: string) => {
+  const createGame = useCallback(async (displayName?: string) => {
     setLoading(true);
     setError(null);
     const name = displayName || getPlayerName();
     setPlayerName(name);
-    const sessionId = sessionIdRef.current || getSessionId();
+    const sessionId = getSession();
 
     try {
       const supabase = getSupabase();
@@ -363,8 +373,38 @@ export function useBingoGame(initialRoomCode?: string) {
         throw error;
       }
 
+      // Synchronously populate host game state
+      const initialHost: Player = {
+        id: data.player_id,
+        session_id: sessionId,
+        display_name: name,
+        player_number: 1,
+        board: null,
+        is_ready: false,
+        connected: true,
+        lines_completed: 0,
+        last_seen_at: new Date().toISOString(),
+      };
+
+      const initialGame: Game = {
+        id: data.game_id,
+        room_code: data.room_code,
+        status: data.status || 'waiting',
+        target_lines: 5,
+        current_turn_player_id: null,
+        winner_id: null,
+        created_at: new Date().toISOString(),
+      };
+
+      setGame(initialGame);
+      setPlayer(initialHost);
+      setP1(initialHost);
+      setP2(null);
+      setCalledNumbers([]);
       setActiveRoomCode(data.room_code);
-      await syncGameState(data.game_id);
+
+      // Background state sync
+      syncGameState(data.game_id).catch(() => {});
       return data.room_code;
     } catch (err: unknown) {
       const msg = (err as Error).message || 'Failed to create game room';
@@ -373,15 +413,15 @@ export function useBingoGame(initialRoomCode?: string) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [getSession, syncGameState]);
 
   // ACTION: Join Game (Supabase Server-Side RPC)
-  const joinGame = async (roomCode: string, displayName?: string) => {
+  const joinGame = useCallback(async (roomCode: string, displayName?: string) => {
     setLoading(true);
     setError(null);
     const name = displayName || getPlayerName();
     setPlayerName(name);
-    const sessionId = sessionIdRef.current || getSessionId();
+    const sessionId = getSession();
 
     try {
       const cleanCode = roomCode.trim().toUpperCase();
@@ -417,7 +457,7 @@ export function useBingoGame(initialRoomCode?: string) {
                 id: data.player_id,
                 session_id: sessionId,
                 display_name: name,
-                player_number: 2,
+                player_number: data.player_number || 2,
                 board: null,
                 is_ready: false,
                 connected: true,
@@ -444,14 +484,14 @@ export function useBingoGame(initialRoomCode?: string) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [getSession, syncGameState]);
 
   // ACTION: Confirm / Set Board (Supabase Server-Side RPC)
-  const setBoard = async (board: number[]) => {
+  const setBoard = useCallback(async (board: number[]) => {
     if (!game?.id) return;
     setLoading(true);
     setError(null);
-    const sessionId = sessionIdRef.current;
+    const sessionId = getSession();
 
     try {
       const supabase = getSupabase();
@@ -491,10 +531,10 @@ export function useBingoGame(initialRoomCode?: string) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [game?.id, getSession, player?.id, syncGameState]);
 
   // ACTION: Call Number (Supabase Server-Side Strict Alternating Turns & Win Detection)
-  const callNumber = async (number: number) => {
+  const callNumber = useCallback(async (number: number) => {
     if (!game?.id || !isMyTurn) return;
     if (calledNumbers.some(c => c.number === number)) return;
 
@@ -502,7 +542,7 @@ export function useBingoGame(initialRoomCode?: string) {
     setOptimisticCalled(number);
     sounds.playCall();
 
-    const sessionId = sessionIdRef.current;
+    const sessionId = getSession();
 
     try {
       const supabase = getSupabase();
@@ -541,10 +581,10 @@ export function useBingoGame(initialRoomCode?: string) {
       setError(msg);
       sounds.playAlert();
     }
-  };
+  }, [calledNumbers, game?.id, getSession, handleRealtimeEvent, isMyTurn]);
 
   // ACTION: Claim Timeout Win
-  const claimTimeoutWin = async () => {
+  const claimTimeoutWin = useCallback(async () => {
     if (!game?.id) return;
     try {
       const supabase = getSupabase();
@@ -552,14 +592,14 @@ export function useBingoGame(initialRoomCode?: string) {
 
       const { data, error } = await supabase.rpc('claim_timeout_win', {
         p_game_id: game.id,
-        p_session_id: sessionIdRef.current,
+        p_session_id: getSession(),
       });
       if (error) throw error;
       handleRealtimeEvent('TIMEOUT_WIN_CLAIMED', data);
     } catch (err: unknown) {
       console.error('Failed to claim timeout:', err);
     }
-  };
+  }, [game?.id, getSession, handleRealtimeEvent]);
 
   // Auto-connect if initialRoomCode provided
   useEffect(() => {

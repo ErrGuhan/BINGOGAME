@@ -46,16 +46,17 @@ export default function App() {
     resetGame,
   } = useBingoGame();
 
-  // Auto-restore active game room on mobile/browser refresh
+  // Auto-restore active game room on initial mount
   React.useEffect(() => {
     const savedRoom = getActiveRoomCode();
-    if (savedRoom && screen === 'home') {
+    if (savedRoom) {
       joinGame(savedRoom).catch((err) => {
         console.warn('Auto-reconnect failed for saved room:', savedRoom, err);
         clearActiveRoomCode();
       });
     }
-  }, [joinGame, screen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Watch game status transitions
   React.useEffect(() => {
@@ -80,10 +81,13 @@ export default function App() {
   // Handle Home -> Create Game
   const handleStartCreate = async () => {
     try {
-      await createGame();
-      setScreen('create');
+      clearActiveRoomCode();
+      const code = await createGame();
+      if (code) {
+        setScreen('create');
+      }
     } catch (err) {
-      console.error(err);
+      console.error('Failed to create game room:', err);
     }
   };
 
@@ -165,7 +169,7 @@ export default function App() {
         badgeType={headerConfig.badgeType}
         subTitle={headerConfig.subTitle}
         showBack={headerConfig.showBack}
-        onBack={() => setScreen('home')}
+        onBack={handleBackToHome}
       />
 
       <main className="flex flex-col relative z-10 w-full min-h-screen px-container-padding-mobile pt-16 pb-12 bg-transparent justify-center">
@@ -174,6 +178,7 @@ export default function App() {
             onCreateGame={handleStartCreate}
             onJoinGame={handleStartJoin}
             loading={loading}
+            errorMessage={error}
           />
         )}
 
@@ -183,7 +188,7 @@ export default function App() {
             opponentConnected={Boolean(p2?.connected)}
             opponentName={p2?.display_name || 'Challenger'}
             onProceedToSetup={handleProceedToSetup}
-            onBack={() => setScreen('home')}
+            onBack={handleBackToHome}
           />
         )}
 
@@ -191,7 +196,7 @@ export default function App() {
           <JoinGameScreen
             initialCode={prefilledJoinCode}
             onJoin={handleJoinSubmit}
-            onBack={() => setScreen('home')}
+            onBack={handleBackToHome}
             loading={loading}
             errorMessage={error}
           />
@@ -201,7 +206,13 @@ export default function App() {
           <BoardSetupScreen
             initialAutoFill={autoFillBoard}
             onConfirmBoard={handleBoardConfirmed}
-            onBack={() => setScreen(player?.player_number === 1 ? 'create' : 'home')}
+            onBack={() => {
+              if (player?.player_number === 1) {
+                setScreen('create');
+              } else {
+                handleBackToHome();
+              }
+            }}
             loading={loading}
             isReady={Boolean(player?.is_ready)}
             opponentName={opponentName}
