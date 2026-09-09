@@ -58,11 +58,11 @@ export const ReconnectingModal: React.FC<ReconnectingModalProps> = ({
         </div>
 
         <h2 className="font-headline-md text-headline-md text-on-surface font-extrabold tracking-tight mb-space-2xs">
-          Connection Interrupted
+          Network Interrupted
         </h2>
-        <p className="font-body-md text-body-md text-on-surface-variant mb-space-sm max-w-[260px]">
-          Reconnecting to room <span className="text-primary font-bold">#{roomCode}</span>... Opponent{' '}
-          <span className="text-secondary font-bold">{opponentName}</span> is waiting.
+        <p className="font-body-md text-body-md text-on-surface-variant mb-space-sm max-w-[280px]">
+          Room <span className="text-primary font-bold">#{roomCode}</span>: Waiting for opponent{' '}
+          <span className="text-secondary font-bold">{opponentName}</span> to reconnect socket...
         </p>
 
         {/* Countdown Box */}

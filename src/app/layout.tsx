@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Outfit, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -55,7 +56,7 @@ export default function RootLayout({
           <div className="absolute top-1/3 -right-24 w-88 h-88 rounded-full bg-secondary-container/25 blur-[90px]" />
           <div className="absolute -bottom-20 left-1/4 w-72 h-72 rounded-full bg-primary-container/10 blur-[80px]" />
         </div>
-        {children}
+        <ErrorBoundary>{children}</ErrorBoundary>
       </body>
     </html>
   );

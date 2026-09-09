@@ -73,16 +73,44 @@ export function validateBoard(board: (number | null)[]): boolean {
   return true;
 }
 
+const memoryStore: Record<string, string> = {};
+
+function safeGetItem(key: string): string | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return localStorage.getItem(key);
+    }
+  } catch {}
+  return memoryStore[key] || null;
+}
+
+function safeSetItem(key: string, value: string): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem(key, value);
+    }
+  } catch {}
+  memoryStore[key] = value;
+}
+
+function safeRemoveItem(key: string): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.removeItem(key);
+    }
+  } catch {}
+  delete memoryStore[key];
+}
+
 /**
  * Retrieves or generates an ephemeral player session ID from localStorage
  */
 export function getSessionId(): string {
-  if (typeof window === 'undefined') return 'server-session';
   const KEY = 'bingo_duel_session_id';
-  let id = localStorage.getItem(KEY);
+  let id = safeGetItem(KEY);
   if (!id) {
     id = 'usr_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
-    localStorage.setItem(KEY, id);
+    safeSetItem(KEY, id);
   }
   return id;
 }
@@ -91,11 +119,23 @@ export function getSessionId(): string {
  * Stored display name helper
  */
 export function getPlayerName(): string {
-  if (typeof window === 'undefined') return 'Duelist';
-  return localStorage.getItem('bingo_duel_player_name') || 'Duelist';
+  return safeGetItem('bingo_duel_player_name') || 'Duelist';
 }
 
 export function setPlayerName(name: string): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem('bingo_duel_player_name', name);
+  safeSetItem('bingo_duel_player_name', name);
+}
+
+const ACTIVE_ROOM_KEY = 'bingo_duel_active_room';
+
+export function getActiveRoomCode(): string | null {
+  return safeGetItem(ACTIVE_ROOM_KEY);
+}
+
+export function setActiveRoomCode(code: string): void {
+  safeSetItem(ACTIVE_ROOM_KEY, code.toUpperCase());
+}
+
+export function clearActiveRoomCode(): void {
+  safeRemoveItem(ACTIVE_ROOM_KEY);
 }

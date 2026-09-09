@@ -3,17 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Game, Player, CalledNumber, GameStateSnapshot, CallNumberResult } from '@/types/bingo';
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase';
-import {
-  mockCreateGame,
-  mockJoinGame,
-  mockSetPlayerBoard,
-  mockCallNumber,
-  mockGetGameState,
-  mockClaimTimeoutWin,
-  mockHeartbeat,
-  subscribeToMockEvents,
-} from '@/lib/mockEngine';
-import { getSessionId, getPlayerName, setPlayerName } from '@/lib/gameEngine';
+import { getSessionId, getPlayerName, setPlayerName, setActiveRoomCode, clearActiveRoomCode } from '@/lib/gameEngine';
 import { sounds } from '@/components/AudioController';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -32,7 +22,10 @@ export function useBingoGame(initialRoomCode?: string) {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const sessionIdRef = useRef<string>('');
   const lastHeartbeatRef = useRef<number>(Date.now());
+  const opponentLastSeenRef = useRef<number>(Date.now());
   const gameRef = useRef<Game | null>(null);
+  const reconnectAttemptRef = useRef<number>(0);
+  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize session ID
   useEffect(() => {
@@ -62,27 +55,39 @@ export function useBingoGame(initialRoomCode?: string) {
     setP2(snapshot.p2);
     setCalledNumbers(snapshot.called_numbers || []);
     setOptimisticCalled(null);
+
+    // Keep active room in local storage if game is ongoing
+    if (snapshot.game?.room_code && snapshot.game.status !== 'completed') {
+      setActiveRoomCode(snapshot.game.room_code);
+    }
+
+    // Refresh opponent presence timestamp if opponent is active
+    const opp = snapshot.player?.player_number === 1 ? snapshot.p2 : snapshot.p1;
+    if (opp?.connected) {
+      opponentLastSeenRef.current = Date.now();
+      setIsOpponentDisconnected(false);
+    }
   }, []);
 
-  // Fetch full game state from source of truth
+  // Fetch full game state from source of truth in Supabase
   const syncGameState = useCallback(async (gameId: string) => {
     if (!gameId) return;
     const sessionId = sessionIdRef.current;
     const supabase = getSupabase();
 
+    if (!supabase || !isSupabaseConfigured()) {
+      console.warn('Supabase not configured for state sync.');
+      return;
+    }
+
     try {
-      if (supabase && isSupabaseConfigured()) {
-        const { data, error } = await supabase.rpc('get_game_state', {
-          p_game_id: gameId,
-          p_session_id: sessionId,
-        });
-        if (error) throw error;
-        if (data) {
-          applySnapshot(data as GameStateSnapshot);
-        }
-      } else {
-        const snapshot = mockGetGameState(gameId, sessionId);
-        applySnapshot(snapshot);
+      const { data, error } = await supabase.rpc('get_game_state', {
+        p_game_id: gameId,
+        p_session_id: sessionId,
+      });
+      if (error) throw error;
+      if (data) {
+        applySnapshot(data as GameStateSnapshot);
       }
     } catch (err: unknown) {
       console.error('Failed to sync game state:', err);
@@ -91,11 +96,13 @@ export function useBingoGame(initialRoomCode?: string) {
 
   // Handle Realtime incoming events
   const handleRealtimeEvent = useCallback((event: string, payload: unknown) => {
+    opponentLastSeenRef.current = Date.now();
+    setIsOpponentDisconnected(false);
+
     const data = payload as Record<string, unknown>;
 
     if (event === 'NUMBER_CALLED') {
       const call = data as unknown as CallNumberResult;
-      // Audio chime
       sounds.playMatch();
       setOptimisticCalled(null);
 
@@ -147,7 +154,7 @@ export function useBingoGame(initialRoomCode?: string) {
         setGame(prev => prev ? {
           ...prev,
           status: 'playing',
-          current_turn_player_id: d.currentTurnPlayerId || prev.current_turn_player_id,
+          current_turn_player_id: d.currentTurnPlayerId || prev.current_turn_player_id || p1?.id || null,
         } : null);
         sounds.playLineComplete();
       }
@@ -165,17 +172,28 @@ export function useBingoGame(initialRoomCode?: string) {
       sounds.playVictory();
     } else if (event === 'HEARTBEAT') {
       lastHeartbeatRef.current = Date.now();
+      opponentLastSeenRef.current = Date.now();
       setIsOpponentDisconnected(false);
     }
-  }, [syncGameState]);
+  }, [p1?.id, syncGameState]);
 
-  // Setup Realtime Channels & Subscriptions
+  // Setup Realtime Channels & Subscriptions with Active Auto-Recovery
   useEffect(() => {
     if (!game?.room_code) return;
     const roomCode = game.room_code.toUpperCase();
     const supabase = getSupabase();
 
-    if (supabase && isSupabaseConfigured()) {
+    if (!supabase || !isSupabaseConfigured()) return;
+
+    let activeChannel: RealtimeChannel | null = null;
+    let isDisposed = false;
+
+    const setupChannel = () => {
+      if (isDisposed) return;
+      if (activeChannel) {
+        supabase.removeChannel(activeChannel);
+      }
+
       const channel = supabase.channel(`room:${roomCode}`, {
         config: { broadcast: { self: false } },
       });
@@ -186,22 +204,61 @@ export function useBingoGame(initialRoomCode?: string) {
         .on('broadcast', { event: 'PLAYER_READY' }, ({ payload }) => handleRealtimeEvent('PLAYER_READY', payload))
         .on('broadcast', { event: 'TIMEOUT_WIN_CLAIMED' }, ({ payload }) => handleRealtimeEvent('TIMEOUT_WIN_CLAIMED', payload))
         .on('broadcast', { event: 'HEARTBEAT' }, ({ payload }) => handleRealtimeEvent('HEARTBEAT', payload))
-        .subscribe();
+        .subscribe((status, err) => {
+          if (status === 'SUBSCRIBED') {
+            reconnectAttemptRef.current = 0;
+            // Immediate state sync upon connecting/reconnecting
+            if (gameRef.current?.id) {
+              syncGameState(gameRef.current.id);
+            }
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            console.warn(`Realtime channel status: ${status}. Scheduling recovery...`, err);
+            if (!isDisposed) {
+              const backoffDelay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), 8000);
+              reconnectAttemptRef.current += 1;
+              if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+              reconnectTimerRef.current = setTimeout(() => {
+                if (!isDisposed) setupChannel();
+              }, backoffDelay);
+            }
+          }
+        });
 
+      activeChannel = channel;
       channelRef.current = channel;
+    };
 
-      return () => {
-        supabase.removeChannel(channel);
-        channelRef.current = null;
-      };
-    } else {
-      // Mock Realtime broadcast subscription across browser tabs
-      const unsub = subscribeToMockEvents((ev, pl) => {
-        handleRealtimeEvent(ev, pl);
-      });
-      return () => unsub();
-    }
-  }, [game?.room_code, handleRealtimeEvent]);
+    setupChannel();
+
+    // Mobile / Tab Wake and Online detection
+    const handleOnline = () => {
+      reconnectAttemptRef.current = 0;
+      setupChannel();
+      if (gameRef.current?.id) syncGameState(gameRef.current.id);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        if (gameRef.current?.id) {
+          syncGameState(gameRef.current.id);
+        }
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isDisposed = true;
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (activeChannel) {
+        supabase.removeChannel(activeChannel);
+      }
+      channelRef.current = null;
+    };
+  }, [game?.room_code, handleRealtimeEvent, syncGameState]);
 
   // Lobby polling fallback (every 2.5s) while in waiting or ready state
   useEffect(() => {
@@ -218,30 +275,54 @@ export function useBingoGame(initialRoomCode?: string) {
   useEffect(() => {
     if (!game?.id || game.status !== 'playing') return;
 
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       const supabase = getSupabase();
-      if (supabase && isSupabaseConfigured()) {
-        supabase.rpc('heartbeat', {
+      if (!supabase || !isSupabaseConfigured() || !game?.id) return;
+
+      try {
+        await supabase.rpc('heartbeat', {
           p_game_id: game.id,
           p_session_id: sessionIdRef.current,
-        }).then(() => {
-          channelRef.current?.send({
-            type: 'broadcast',
-            event: 'HEARTBEAT',
-            payload: { playerId: player?.id, ts: Date.now() },
-          });
         });
-      } else {
-        mockHeartbeat(game.id, sessionIdRef.current);
+        channelRef.current?.send({
+          type: 'broadcast',
+          event: 'HEARTBEAT',
+          payload: { playerId: player?.id, ts: Date.now() },
+        });
+      } catch (err: unknown) {
+        console.error('Heartbeat failed:', err);
       }
     }, 10000);
 
     return () => clearInterval(interval);
   }, [game?.id, game?.status, player?.id]);
 
+  // Monitor Opponent Inactivity / Socket Disconnect (>45s silence during playing)
+  useEffect(() => {
+    if (!game?.id || game.status !== 'playing') {
+      setIsOpponentDisconnected(false);
+      return;
+    }
+
+    const checkInterval = setInterval(() => {
+      const timeSinceLastSignal = Date.now() - opponentLastSeenRef.current;
+      // If no signal/event/heartbeat received from opponent for >45s, flag as disconnected
+      if (timeSinceLastSignal > 45000) {
+        setIsOpponentDisconnected(true);
+      } else {
+        setIsOpponentDisconnected(false);
+      }
+    }, 5000);
+
+    return () => clearInterval(checkInterval);
+  }, [game?.id, game?.status]);
+
   // Reconnect check / timeout countdown
   useEffect(() => {
-    if (!isOpponentDisconnected || game?.status !== 'playing') return;
+    if (!isOpponentDisconnected || game?.status !== 'playing') {
+      setReconnectCountdown(60);
+      return;
+    }
 
     const timer = setInterval(() => {
       setReconnectCountdown(prev => {
@@ -256,7 +337,7 @@ export function useBingoGame(initialRoomCode?: string) {
     return () => clearInterval(timer);
   }, [isOpponentDisconnected, game?.status]);
 
-  // ACTION: Create Game
+  // ACTION: Create Game (Supabase Server-Side RPC)
   const createGame = async (displayName?: string) => {
     setLoading(true);
     setError(null);
@@ -266,24 +347,25 @@ export function useBingoGame(initialRoomCode?: string) {
 
     try {
       const supabase = getSupabase();
-      if (supabase && isSupabaseConfigured()) {
-        const { data, error } = await supabase.rpc('create_game', {
-          p_session_id: sessionId,
-          p_display_name: name,
-        });
-        if (error) {
-          if (error.code === 'PGRST202' || error.code === 'PGRST205') {
-            throw new Error('Supabase functions not yet installed. Please run supabase/schema.sql in your Supabase SQL Editor!');
-          }
-          throw error;
-        }
-        await syncGameState(data.game_id);
-        return data.room_code;
-      } else {
-        const res = mockCreateGame(sessionId, name);
-        await syncGameState(res.game_id);
-        return res.room_code;
+      if (!supabase || !isSupabaseConfigured()) {
+        throw new Error('Supabase is not configured. Please check your environment variables in .env.local.');
       }
+
+      const { data, error } = await supabase.rpc('create_game', {
+        p_session_id: sessionId,
+        p_display_name: name,
+      });
+
+      if (error) {
+        if (error.code === 'PGRST202' || error.code === 'PGRST205') {
+          throw new Error('Supabase functions not yet installed. Please run supabase/schema.sql in your Supabase SQL Editor!');
+        }
+        throw error;
+      }
+
+      setActiveRoomCode(data.room_code);
+      await syncGameState(data.game_id);
+      return data.room_code;
     } catch (err: unknown) {
       const msg = (err as Error).message || 'Failed to create game room';
       setError(msg);
@@ -293,7 +375,7 @@ export function useBingoGame(initialRoomCode?: string) {
     }
   };
 
-  // ACTION: Join Game
+  // ACTION: Join Game (Supabase Server-Side RPC)
   const joinGame = async (roomCode: string, displayName?: string) => {
     setLoading(true);
     setError(null);
@@ -304,50 +386,57 @@ export function useBingoGame(initialRoomCode?: string) {
     try {
       const cleanCode = roomCode.trim().toUpperCase();
       const supabase = getSupabase();
-      if (supabase && isSupabaseConfigured()) {
-        const { data, error } = await supabase.rpc('join_game', {
-          p_room_code: cleanCode,
-          p_session_id: sessionId,
-          p_display_name: name,
-        });
-        if (error) {
-          if (error.code === 'PGRST202' || error.code === 'PGRST205') {
-            throw new Error('Supabase functions not yet installed. Please run supabase/schema.sql in your Supabase SQL Editor!');
-          }
-          throw error;
-        }
-
-        // Broadcast to Room that Player 2 joined so Host receives immediate notification
-        const joinChannel = supabase.channel(`room:${cleanCode}`);
-        joinChannel.subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            joinChannel.send({
-              type: 'broadcast',
-              event: 'PLAYER_JOINED',
-              payload: {
-                player: {
-                  id: data.player_id,
-                  session_id: sessionId,
-                  display_name: name,
-                  player_number: 2,
-                  board: null,
-                  is_ready: false,
-                  connected: true,
-                  lines_completed: 0,
-                  last_seen_at: new Date().toISOString(),
-                },
-              },
-            });
-          }
-        });
-
-        await syncGameState(data.game_id);
-        return data;
-      } else {
-        const res = mockJoinGame(cleanCode, sessionId, name);
-        await syncGameState(res.game_id);
-        return res;
+      if (!supabase || !isSupabaseConfigured()) {
+        throw new Error('Supabase is not configured. Please check your environment variables in .env.local.');
       }
+
+      const { data, error } = await supabase.rpc('join_game', {
+        p_room_code: cleanCode,
+        p_session_id: sessionId,
+        p_display_name: name,
+      });
+
+      if (error) {
+        if (error.code === 'PGRST202' || error.code === 'PGRST205') {
+          throw new Error('Supabase functions not yet installed. Please run supabase/schema.sql in your Supabase SQL Editor!');
+        }
+        throw error;
+      }
+
+      setActiveRoomCode(cleanCode);
+
+      // Broadcast to Room that Player 2 joined so Host receives immediate notification
+      const joinChannel = supabase.channel(`room:${cleanCode}`);
+      joinChannel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          joinChannel.send({
+            type: 'broadcast',
+            event: 'PLAYER_JOINED',
+            payload: {
+              player: {
+                id: data.player_id,
+                session_id: sessionId,
+                display_name: name,
+                player_number: 2,
+                board: null,
+                is_ready: false,
+                connected: true,
+                lines_completed: 0,
+                last_seen_at: new Date().toISOString(),
+              },
+            },
+          }).then(() => {
+            setTimeout(() => {
+              supabase.removeChannel(joinChannel);
+            }, 1000);
+          }).catch(() => {
+            supabase.removeChannel(joinChannel);
+          });
+        }
+      });
+
+      await syncGameState(data.game_id);
+      return data;
     } catch (err: unknown) {
       const msg = (err as Error).message || 'Failed to join game room';
       setError(msg);
@@ -357,7 +446,7 @@ export function useBingoGame(initialRoomCode?: string) {
     }
   };
 
-  // ACTION: Confirm / Set Board
+  // ACTION: Confirm / Set Board (Supabase Server-Side RPC)
   const setBoard = async (board: number[]) => {
     if (!game?.id) return;
     setLoading(true);
@@ -366,35 +455,35 @@ export function useBingoGame(initialRoomCode?: string) {
 
     try {
       const supabase = getSupabase();
-      if (supabase && isSupabaseConfigured()) {
-        const { data, error } = await supabase.rpc('set_player_board', {
-          p_game_id: game.id,
-          p_session_id: sessionId,
-          p_board: board,
-        });
-        if (error) {
-          if (error.code === 'PGRST202' || error.code === 'PGRST205') {
-            throw new Error('Supabase functions not yet installed. Please run supabase/schema.sql in your Supabase SQL Editor!');
-          }
-          throw error;
-        }
-
-        channelRef.current?.send({
-          type: 'broadcast',
-          event: 'PLAYER_READY',
-          payload: {
-            playerId: player?.id,
-            allReady: data?.all_ready,
-            status: data?.game_status,
-            currentTurnPlayerId: data?.current_turn_player_id,
-          },
-        });
-
-        await syncGameState(game.id);
-      } else {
-        mockSetPlayerBoard(game.id, sessionId, board);
-        await syncGameState(game.id);
+      if (!supabase || !isSupabaseConfigured()) {
+        throw new Error('Supabase is not configured. Please check your environment variables in .env.local.');
       }
+
+      const { data, error } = await supabase.rpc('set_player_board', {
+        p_game_id: game.id,
+        p_session_id: sessionId,
+        p_board: board,
+      });
+
+      if (error) {
+        if (error.code === 'PGRST202' || error.code === 'PGRST205') {
+          throw new Error('Supabase functions not yet installed. Please run supabase/schema.sql in your Supabase SQL Editor!');
+        }
+        throw error;
+      }
+
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'PLAYER_READY',
+        payload: {
+          playerId: player?.id,
+          allReady: data?.all_ready,
+          status: data?.game_status,
+          currentTurnPlayerId: data?.current_turn_player_id,
+        },
+      });
+
+      await syncGameState(game.id);
     } catch (err: unknown) {
       const msg = (err as Error).message || 'Failed to confirm board';
       setError(msg);
@@ -404,7 +493,7 @@ export function useBingoGame(initialRoomCode?: string) {
     }
   };
 
-  // ACTION: Call Number (Sub-300ms Perceived Latency with Optimistic UI)
+  // ACTION: Call Number (Supabase Server-Side Strict Alternating Turns & Win Detection)
   const callNumber = async (number: number) => {
     if (!game?.id || !isMyTurn) return;
     if (calledNumbers.some(c => c.number === number)) return;
@@ -417,35 +506,34 @@ export function useBingoGame(initialRoomCode?: string) {
 
     try {
       const supabase = getSupabase();
-      if (supabase && isSupabaseConfigured()) {
-        const { data, error } = await supabase.rpc('call_number', {
-          p_game_id: game.id,
-          p_session_id: sessionId,
-          p_number: number,
-        });
-
-        if (error) {
-          if (error.code === 'PGRST202' || error.code === 'PGRST205') {
-            throw new Error('Supabase functions not yet installed. Please run supabase/schema.sql in your Supabase SQL Editor!');
-          }
-          throw error;
-        }
-
-        const result = data as CallNumberResult;
-
-        // Broadcast to opponent instantly via Supabase Realtime
-        channelRef.current?.send({
-          type: 'broadcast',
-          event: 'NUMBER_CALLED',
-          payload: result,
-        });
-
-        // Apply local state
-        handleRealtimeEvent('NUMBER_CALLED', result);
-      } else {
-        const result = mockCallNumber(game.id, sessionId, number);
-        handleRealtimeEvent('NUMBER_CALLED', result);
+      if (!supabase || !isSupabaseConfigured()) {
+        throw new Error('Supabase is not configured. Please check your environment variables in .env.local.');
       }
+
+      const { data, error } = await supabase.rpc('call_number', {
+        p_game_id: game.id,
+        p_session_id: sessionId,
+        p_number: number,
+      });
+
+      if (error) {
+        if (error.code === 'PGRST202' || error.code === 'PGRST205') {
+          throw new Error('Supabase functions not yet installed. Please run supabase/schema.sql in your Supabase SQL Editor!');
+        }
+        throw error;
+      }
+
+      const result = data as CallNumberResult;
+
+      // Broadcast to opponent instantly via Supabase Realtime
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'NUMBER_CALLED',
+        payload: result,
+      });
+
+      // Apply local state
+      handleRealtimeEvent('NUMBER_CALLED', result);
     } catch (err: unknown) {
       // Rollback on rejection (e.g., turn desync)
       setOptimisticCalled(null);
@@ -460,17 +548,14 @@ export function useBingoGame(initialRoomCode?: string) {
     if (!game?.id) return;
     try {
       const supabase = getSupabase();
-      if (supabase && isSupabaseConfigured()) {
-        const { data, error } = await supabase.rpc('claim_timeout_win', {
-          p_game_id: game.id,
-          p_session_id: sessionIdRef.current,
-        });
-        if (error) throw error;
-        handleRealtimeEvent('TIMEOUT_WIN_CLAIMED', data);
-      } else {
-        const data = mockClaimTimeoutWin(game.id, sessionIdRef.current);
-        handleRealtimeEvent('TIMEOUT_WIN_CLAIMED', data);
-      }
+      if (!supabase || !isSupabaseConfigured()) return;
+
+      const { data, error } = await supabase.rpc('claim_timeout_win', {
+        p_game_id: game.id,
+        p_session_id: sessionIdRef.current,
+      });
+      if (error) throw error;
+      handleRealtimeEvent('TIMEOUT_WIN_CLAIMED', data);
     } catch (err: unknown) {
       console.error('Failed to claim timeout:', err);
     }
@@ -509,12 +594,14 @@ export function useBingoGame(initialRoomCode?: string) {
     claimTimeoutWin,
     refreshState: () => game?.id && syncGameState(game.id),
     resetGame: () => {
+      clearActiveRoomCode();
       setGame(null);
       setPlayer(null);
       setP1(null);
       setP2(null);
       setCalledNumbers([]);
       setError(null);
+      setIsOpponentDisconnected(false);
     },
   };
 }

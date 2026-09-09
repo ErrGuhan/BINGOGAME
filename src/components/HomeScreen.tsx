@@ -44,8 +44,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-container opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-container" />
           </span>
-          <span className="font-label-sm text-label-sm text-on-surface uppercase tracking-wider">
-            1,420 Players Online <span className="text-on-surface-variant px-1">•</span> Instant Match
+          <span className="font-label-sm text-label-sm text-on-surface uppercase tracking-wider font-bold">
+            Live Supabase Realtime <span className="text-on-surface-variant px-1">•</span> Untimed 1v1 Duels
           </span>
         </div>
       </div>
@@ -131,22 +131,22 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         {/* Headline and Descriptor */}
         <div className="relative z-10 flex flex-col items-center mt-space-xs gap-1">
           <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary-container/15 text-primary-container font-label-sm text-label-sm border border-primary-container/20">
-            <span className="material-symbols-outlined text-[14px]">bolt</span>
-            HIGH-STAKES DUEL
+            <span className="material-symbols-outlined text-[14px]">all_inclusive</span>
+            NO TIME LIMIT
           </div>
           <h1 className="font-headline-xl-mobile text-headline-xl-mobile text-on-surface tracking-tight mt-1 font-extrabold">
             REAL-TIME 1v1 BINGO
           </h1>
           <p className="font-body-md text-body-md text-on-surface-variant max-w-[280px] mt-0.5">
-            Race head-to-head on live synchronized matrices. Call fast, chain lines, claim victory.
+            Head-to-head on live synchronized boards with no turn timer. Strategize carefully, chain lines, and claim BINGO!
           </p>
         </div>
 
         {/* Micro Match Ticker Ribbon */}
         <div className="relative z-10 w-full mt-space-md pt-space-xs flex items-center justify-between px-space-xs text-on-surface-variant font-label-sm text-label-sm border-t border-outline-variant/20">
           <div className="flex items-center gap-1.5">
-            <span className="material-symbols-outlined text-primary-container text-[16px]">timer</span>
-            <span>Avg Match: <strong className="text-on-surface">90s</strong></span>
+            <span className="material-symbols-outlined text-primary-container text-[16px]">all_inclusive</span>
+            <span>Match Clock: <strong className="text-on-surface">No Limit</strong></span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="material-symbols-outlined text-tertiary-fixed-dim text-[16px]">military_tech</span>

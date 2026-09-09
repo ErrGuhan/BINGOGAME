@@ -11,6 +11,7 @@ import { VictoryScreen } from '@/components/VictoryScreen';
 import { ReconnectingModal } from '@/components/ReconnectingModal';
 import { useBingoGame } from '@/hooks/useBingoGame';
 import { sounds } from '@/components/AudioController';
+import { getActiveRoomCode, clearActiveRoomCode } from '@/lib/gameEngine';
 
 type ScreenState = 'home' | 'create' | 'join' | 'setup' | 'game' | 'victory';
 
@@ -44,6 +45,17 @@ export default function App() {
     claimTimeoutWin,
     resetGame,
   } = useBingoGame();
+
+  // Auto-restore active game room on mobile/browser refresh
+  React.useEffect(() => {
+    const savedRoom = getActiveRoomCode();
+    if (savedRoom && screen === 'home') {
+      joinGame(savedRoom).catch((err) => {
+        console.warn('Auto-reconnect failed for saved room:', savedRoom, err);
+        clearActiveRoomCode();
+      });
+    }
+  }, [joinGame, screen]);
 
   // Watch game status transitions
   React.useEffect(() => {
@@ -118,6 +130,7 @@ export default function App() {
 
   // Handle Rematch
   const handleRematch = async () => {
+    clearActiveRoomCode();
     resetGame();
     sounds.playTap();
     await handleStartCreate();
@@ -125,6 +138,7 @@ export default function App() {
 
   // Handle Back To Home
   const handleBackToHome = () => {
+    clearActiveRoomCode();
     resetGame();
     sounds.playTap();
     setScreen('home');

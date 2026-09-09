@@ -89,7 +89,7 @@ export const CreateGameScreen: React.FC<CreateGameScreenProps> = ({
             Your Duel Room is Ready
           </h2>
           <p className="font-body-md text-body-md text-on-surface-variant">
-            Send the room credentials to your rival to initiate real-time synchronized countdown.
+            Send the room credentials to your rival. Untimed duel — take all the time you need for each call.
           </p>
         </div>
 

@@ -1,9 +1,103 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Player, CalledNumber } from '@/types/bingo';
 import { calculateLines } from '@/lib/gameEngine';
 import { sounds } from './AudioController';
+
+const ALL_NUMBERS = Array.from({ length: 25 }, (_, i) => i + 1);
+
+interface BingoGridCellProps {
+  num: number;
+  isMarked: boolean;
+  isWinningCell: boolean;
+  isSelected: boolean;
+  isMyTurn: boolean;
+  onSelect: (num: number) => void;
+}
+
+const BingoGridCell = React.memo(function BingoGridCell({
+  num,
+  isMarked,
+  isWinningCell,
+  isSelected,
+  isMyTurn,
+  onSelect,
+}: BingoGridCellProps) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        sounds.playTap();
+        if (!isMarked && isMyTurn) {
+          onSelect(num);
+        }
+      }}
+      style={{ willChange: 'transform', transform: 'translateZ(0)' }}
+      className={`aspect-square rounded-xl flex flex-col items-center justify-center relative transition-all ${
+        isWinningCell
+          ? 'bg-gradient-to-br from-primary-fixed to-primary-container text-on-primary-fixed shadow-[0_0_18px_rgba(0,245,212,0.8)] border-2 border-white scale-[1.02] z-10'
+          : isMarked
+          ? 'bg-gradient-to-br from-primary-container to-on-primary-container text-on-primary-fixed shadow-[0_0_14px_rgba(0,245,212,0.4)]'
+          : isSelected
+          ? 'bg-surface-bright text-primary-container border-2 border-primary-container shadow-[0_0_14px_rgba(0,245,212,0.4)] scale-95'
+          : 'bg-surface-container-high/80 text-on-surface hover:bg-surface-bright active:scale-95 shadow-sm border border-outline-variant/15'
+      }`}
+    >
+      <span
+        className={`font-label-tile-mobile text-label-tile-mobile font-bold ${
+          isMarked ? 'line-through opacity-90 font-extrabold' : ''
+        }`}
+      >
+        {num}
+      </span>
+      {isMarked && (
+        <span className="material-symbols-outlined text-[13px] absolute bottom-0.5 right-1 text-on-primary-fixed font-black">
+          check
+        </span>
+      )}
+    </button>
+  );
+});
+
+interface CallerPadTileProps {
+  num: number;
+  isCalled: boolean;
+  isSelected: boolean;
+  isMyTurn: boolean;
+  onSelect: (num: number) => void;
+}
+
+const CallerPadTile = React.memo(function CallerPadTile({
+  num,
+  isCalled,
+  isSelected,
+  isMyTurn,
+  onSelect,
+}: CallerPadTileProps) {
+  return (
+    <button
+      type="button"
+      disabled={isCalled || !isMyTurn}
+      onClick={() => {
+        sounds.playTap();
+        onSelect(num);
+      }}
+      style={{ willChange: 'transform', transform: 'translateZ(0)' }}
+      className={`h-9 rounded-lg font-label-md text-label-md flex items-center justify-center transition-all ${
+        isCalled
+          ? 'bg-surface-container-lowest/40 text-on-surface-variant/30 line-through cursor-not-allowed'
+          : isSelected
+          ? 'bg-primary-container text-on-primary-container font-black shadow-[0_0_12px_rgba(0,245,212,0.8)] scale-95'
+          : isMyTurn
+          ? 'bg-surface-container-high/90 text-on-surface hover:bg-surface-bright active:scale-90 shadow-sm cursor-pointer font-bold'
+          : 'bg-surface-container-high/50 text-on-surface-variant/40 cursor-not-allowed'
+      }`}
+    >
+      {num}
+    </button>
+  );
+});
 
 interface MainGameScreenProps {
   board: number[];
@@ -34,7 +128,10 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
 }) => {
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
   const [isCalling, setIsCalling] = useState<boolean>(false);
-  const [turnSeconds, setTurnSeconds] = useState<number>(15);
+
+  const handleSelectNumber = useCallback((num: number) => {
+    setSelectedNumber(num);
+  }, []);
 
   // Set of all called numbers including optimistic call
   const calledNumbersSet = useMemo(() => {
@@ -47,18 +144,6 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
   const { completedLines } = useMemo(() => {
     return calculateLines(board, Array.from(calledNumbersSet));
   }, [board, calledNumbersSet]);
-
-  // Turn countdown timer loop
-  useEffect(() => {
-    setTurnSeconds(15);
-  }, [isMyTurn, calledNumbers.length]);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTurnSeconds(prev => (prev > 0 ? prev - 1 : 15));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   // Pre-select first available number when it becomes player's turn
   useEffect(() => {
@@ -97,7 +182,7 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
 
   return (
     <div className="flex flex-col w-full max-w-md mx-auto space-y-2.5 select-none pb-8 pt-1">
-      {/* 1v1 Battle Telemetry & Turn Countdown Header */}
+      {/* 1v1 Battle Telemetry & Untimed Turn Status Header */}
       <section className="w-full relative">
         <div className="w-full bg-surface-container/80 backdrop-blur-xl rounded-xl p-2.5 shadow-xl border border-outline-variant/30 flex flex-col gap-2">
           {/* Turn Indicator Header Pill */}
@@ -112,45 +197,33 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
               </span>
             </div>
 
-            {/* Center Dynamic Turn Pill */}
+            {/* Center Dynamic Turn Pill with Untimed No-Limit Badge */}
             <div
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full border transition-all ${
+              className={`flex items-center gap-2 px-3 py-1 rounded-full border transition-all ${
                 isMyTurn
-                  ? 'bg-primary-container/20 border-primary-container shadow-[0_0_15px_rgba(0,245,212,0.35)]'
-                  : 'bg-secondary-container/20 border-secondary shadow-[0_0_15px_rgba(168,85,247,0.35)]'
+                  ? 'bg-primary-container/20 border-primary-container shadow-[0_0_18px_rgba(0,245,212,0.4)]'
+                  : 'bg-secondary-container/20 border-secondary shadow-[0_0_18px_rgba(168,85,247,0.3)]'
               }`}
             >
-              <span className={`font-label-sm text-label-sm uppercase tracking-wider font-extrabold ${isMyTurn ? 'text-primary-fixed' : 'text-secondary-fixed'}`}>
+              <span className={`w-2 h-2 rounded-full ${isMyTurn ? 'bg-primary-fixed animate-ping' : 'bg-secondary-fixed animate-pulse'}`} />
+              <span className={`font-label-sm text-label-sm uppercase tracking-wider font-extrabold text-[11px] ${isMyTurn ? 'text-primary-fixed' : 'text-secondary-fixed'}`}>
                 {isMyTurn ? 'YOUR TURN' : 'OPPONENT TURN'}
               </span>
-              <div className="relative w-5 h-5 flex items-center justify-center">
-                <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-                  <path
-                    className="text-surface-bright stroke-current"
-                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                    fill="none"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className={isMyTurn ? 'text-primary-container stroke-current' : 'text-secondary stroke-current'}
-                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                    fill="none"
-                    strokeDasharray={`${(turnSeconds / 15) * 100}, 100`}
-                    strokeLinecap="round"
-                    strokeWidth="4"
-                  />
-                </svg>
-                <span className="absolute font-label-sm text-label-sm text-on-surface font-bold text-[9px]">
-                  {turnSeconds}s
-                </span>
+              <div className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                isMyTurn
+                  ? 'bg-primary-container/30 text-on-primary-fixed'
+                  : 'bg-secondary-container/30 text-secondary-fixed'
+              }`}>
+                <span className="material-symbols-outlined text-[12px]">all_inclusive</span>
+                <span>UNTIMED</span>
               </div>
             </div>
 
-            <div className="flex items-center gap-1 text-secondary-fixed-dim font-label-sm text-label-sm text-[10px] font-bold">
+            <div className="flex items-center gap-1 text-primary-fixed-dim font-label-sm text-label-sm text-[10px] font-bold">
               <span className="material-symbols-outlined text-[15px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                bolt
+                all_inclusive
               </span>
-              <span>Ranked</span>
+              <span>No Limit</span>
             </div>
           </div>
 
@@ -322,47 +395,19 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
             </div>
           )}
 
-          {/* 5x5 Grid Board */}
+          {/* 5x5 Grid Board (Memoized Cells) */}
           <div className="grid grid-cols-5 gap-1.5 w-full h-full relative z-10" id="bingo-board">
-            {board.map((num, idx) => {
-              const isMarked = calledNumbersSet.has(num);
-              const isWinningCell = completedLines.some(line => line.includes(idx));
-
-              return (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => {
-                    sounds.playTap();
-                    if (!isMarked && isMyTurn) {
-                      setSelectedNumber(num);
-                    }
-                  }}
-                  className={`aspect-square rounded-xl flex flex-col items-center justify-center relative transition-all ${
-                    isWinningCell
-                      ? 'bg-gradient-to-br from-primary-fixed to-primary-container text-on-primary-fixed shadow-[0_0_18px_rgba(0,245,212,0.8)] border-2 border-white scale-[1.02] z-10'
-                      : isMarked
-                      ? 'bg-gradient-to-br from-primary-container to-on-primary-container text-on-primary-fixed shadow-[0_0_14px_rgba(0,245,212,0.4)]'
-                      : selectedNumber === num
-                      ? 'bg-surface-bright text-primary-container border-2 border-primary-container shadow-[0_0_14px_rgba(0,245,212,0.4)] scale-95'
-                      : 'bg-surface-container-high/80 text-on-surface hover:bg-surface-bright active:scale-95 shadow-sm border border-outline-variant/15'
-                  }`}
-                >
-                  <span
-                    className={`font-label-tile-mobile text-label-tile-mobile font-bold ${
-                      isMarked ? 'line-through opacity-90 font-extrabold' : ''
-                    }`}
-                  >
-                    {num}
-                  </span>
-                  {isMarked && (
-                    <span className="material-symbols-outlined text-[13px] absolute bottom-0.5 right-1 text-on-primary-fixed font-black">
-                      check
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+            {board.map((num, idx) => (
+              <BingoGridCell
+                key={idx}
+                num={num}
+                isMarked={calledNumbersSet.has(num)}
+                isWinningCell={completedLines.some(line => line.includes(idx))}
+                isSelected={selectedNumber === num}
+                isMyTurn={isMyTurn}
+                onSelect={handleSelectNumber}
+              />
+            ))}
           </div>
         </div>
       </section>
@@ -374,7 +419,7 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
           <div className="flex items-center gap-1.5">
             <span className="material-symbols-outlined text-primary-container text-[18px]">touch_app</span>
             <span className="font-headline-sm text-headline-sm text-on-surface font-bold text-sm">
-              {isMyTurn ? 'Call Your Next Number' : 'Waiting for Rival Call...'}
+              {isMyTurn ? 'Take your time — Call any number' : 'Untimed duel: Waiting for rival...'}
             </span>
           </div>
           <div className="flex items-center gap-1 bg-surface-container-high px-2 py-0.5 rounded-full border border-outline-variant/30">
@@ -385,35 +430,18 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
           </div>
         </div>
 
-        {/* 1-25 Compact Thumb Matrix */}
+        {/* 1-25 Compact Thumb Matrix (Memoized Tiles) */}
         <div className="grid grid-cols-7 gap-1.5 p-1 bg-surface-container-lowest/80 rounded-xl max-h-32 overflow-y-auto border border-outline-variant/20">
-          {Array.from({ length: 25 }, (_, i) => i + 1).map(num => {
-            const isCalled = calledNumbersSet.has(num);
-            const isSelected = selectedNumber === num;
-
-            return (
-              <button
-                key={num}
-                type="button"
-                disabled={isCalled || !isMyTurn}
-                onClick={() => {
-                  sounds.playTap();
-                  setSelectedNumber(num);
-                }}
-                className={`h-9 rounded-lg font-label-md text-label-md flex items-center justify-center transition-all ${
-                  isCalled
-                    ? 'bg-surface-container-lowest/40 text-on-surface-variant/30 line-through cursor-not-allowed'
-                    : isSelected
-                    ? 'bg-primary-container text-on-primary-container font-black shadow-[0_0_12px_rgba(0,245,212,0.8)] scale-95'
-                    : isMyTurn
-                    ? 'bg-surface-container-high/90 text-on-surface hover:bg-surface-bright active:scale-90 shadow-sm cursor-pointer font-bold'
-                    : 'bg-surface-container-high/50 text-on-surface-variant/40 cursor-not-allowed'
-                }`}
-              >
-                {num}
-              </button>
-            );
-          })}
+          {ALL_NUMBERS.map(num => (
+            <CallerPadTile
+              key={num}
+              num={num}
+              isCalled={calledNumbersSet.has(num)}
+              isSelected={selectedNumber === num}
+              isMyTurn={isMyTurn}
+              onSelect={handleSelectNumber}
+            />
+          ))}
         </div>
 
         {/* Master Action Call Button & Tactical Bingo Claim Button */}

@@ -663,3 +663,15 @@ BEGIN
     );
 END;
 $$;
+
+-- 5. EXPLICIT SECURITY & EXECUTION PERMISSIONS
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION create_game(TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION join_game(TEXT, TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION set_player_board(UUID, TEXT, JSONB) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION call_number(UUID, TEXT, INT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION claim_timeout_win(UUID, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION heartbeat(UUID, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_game_state(UUID, TEXT) TO anon, authenticated;
+
