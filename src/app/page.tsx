@@ -87,14 +87,26 @@ export default function App() {
     } else if (game.status === 'playing') {
       setScreen('game');
     } else if (game.status === 'completed') {
-      setScreen('victory');
+      if (rematchStatus !== 'accepted') {
+        setScreen('victory');
+      }
     }
-  }, [game?.status, player?.is_ready, player?.player_number, screen]);
+  }, [game?.status, player?.is_ready, player?.player_number, screen, rematchStatus]);
 
   // Auto-navigate to setup when rematch is accepted
   React.useEffect(() => {
     if (rematchStatus === 'accepted') {
       setScreen('setup');
+    }
+  }, [rematchStatus]);
+
+  // When rematch is rejected, redirect both players to home
+  React.useEffect(() => {
+    if (rematchStatus === 'declined') {
+      sounds.playAlert();
+      clearActiveRoomCode();
+      resetGame();
+      setScreen('home');
     }
   }, [rematchStatus]);
 
@@ -226,6 +238,7 @@ export default function App() {
 
         {screen === 'setup' && (
           <BoardSetupScreen
+            key={`setup_${game?.id || 'room'}_${game?.status}_${rematchStatus}`}
             initialAutoFill={autoFillBoard}
             onConfirmBoard={handleBoardConfirmed}
             onBack={() => {
@@ -276,10 +289,19 @@ export default function App() {
             rematchRequesterName={rematchRequesterName}
             onRematch={handleRematch}
             onAcceptRematch={async () => {
-              await acceptRematch();
+              try {
+                await acceptRematch();
+              } catch (err) {
+                console.error('Failed to accept rematch:', err);
+              }
               setScreen('setup');
             }}
-            onDeclineRematch={declineRematch}
+            onDeclineRematch={() => {
+              declineRematch();
+              clearActiveRoomCode();
+              resetGame();
+              setScreen('home');
+            }}
             onCancelRematchRequest={cancelRematchRequest}
             onBackToHome={handleBackToHome}
           />

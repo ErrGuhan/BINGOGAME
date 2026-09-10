@@ -157,17 +157,17 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
               className="h-12 rounded-xl bg-surface-container-highest hover:bg-surface-bright text-error font-bold text-sm border border-error/30 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <span className="material-symbols-outlined text-[18px]">cancel</span>
-              <span>Decline</span>
+              <span>Reject</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* Rematch Declined Banner */}
+      {/* Rematch Rejected Banner */}
       {rematchStatus === 'declined' && (
         <div className="w-full rounded-xl bg-error-container/40 border border-error/40 p-3 flex items-center justify-center gap-2 text-error text-xs font-bold animate-fadeIn">
           <span className="material-symbols-outlined text-[18px]">info</span>
-          <span>{rematchRequesterName || opponentName} declined the rematch.</span>
+          <span>{rematchRequesterName || opponentName} rejected the rematch. Returning to arena...</span>
         </div>
       )}
 

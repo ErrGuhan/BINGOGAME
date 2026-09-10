@@ -51,6 +51,11 @@ export function useBingoGame(initialRoomCode?: string) {
     playerRef.current = player;
   }, [player]);
 
+  const rematchStatusRef = useRef(rematchStatus);
+  useEffect(() => {
+    rematchStatusRef.current = rematchStatus;
+  }, [rematchStatus]);
+
   const isHost = player?.player_number === 1;
   const opponent = isHost ? p2 : p1;
   const isMyTurn = game?.status === 'playing' && game.current_turn_player_id === player?.id;
@@ -64,12 +69,20 @@ export function useBingoGame(initialRoomCode?: string) {
   // Sync state from snapshot
   const applySnapshot = useCallback((snapshot: GameStateSnapshot | null) => {
     if (!snapshot) return;
+
+    // Guard: Do not let stale "completed" snapshots pull players back after rematch acceptance
+    if (rematchStatusRef.current === 'accepted' && snapshot.game?.status === 'completed') {
+      return;
+    }
+
     setGame(snapshot.game);
     if (snapshot.player) {
       const p = snapshot.player;
+      const isRematchOrReady = rematchStatusRef.current === 'accepted' || snapshot.game?.status === 'ready';
       setPlayer(prev => ({
         ...p,
-        board: p.board || prev?.board || null,
+        board: isRematchOrReady ? (p.board || null) : (p.board || prev?.board || null),
+        is_ready: isRematchOrReady ? Boolean(p.is_ready) : (p.is_ready ?? prev?.is_ready ?? false),
       }));
     }
     setP1(snapshot.p1);
@@ -212,17 +225,11 @@ export function useBingoGame(initialRoomCode?: string) {
         winner_id: null,
         current_turn_player_id: null,
       } : null);
-      if (gameRef.current?.id) {
-        syncGameState(gameRef.current.id);
-      }
     } else if (event === 'REMATCH_DECLINED') {
       const d = data as { declinerName?: string };
       setRematchStatus('declined');
       setRematchRequesterName(d.declinerName || 'Opponent');
       sounds.playAlert();
-      setTimeout(() => {
-        setRematchStatus(prev => prev === 'declined' ? 'idle' : prev);
-      }, 4000);
     } else if (event === 'REMATCH_CANCELLED') {
       setRematchStatus(prev => prev === 'received' ? 'idle' : prev);
       setRematchRequesterName(null);
@@ -727,7 +734,35 @@ export function useBingoGame(initialRoomCode?: string) {
       current_turn_player_id: null,
     } : null);
 
-    // 2. Broadcast acceptance to opponent via Realtime channel
+    // 2. Execute server-side rematch RPC (with fallback direct table updates)
+    try {
+      const supabase = getSupabase();
+      if (supabase && isSupabaseConfigured()) {
+        const { error: rpcErr } = await supabase.rpc('rematch_game', {
+          p_game_id: game.id,
+          p_session_id: sessionId,
+        });
+        if (rpcErr) {
+          console.warn('Server rematch RPC note (applying direct fallback):', rpcErr);
+          await supabase.from('called_numbers').delete().eq('game_id', game.id);
+          await supabase.from('games').update({
+            status: 'ready',
+            winner_id: null,
+            current_turn_player_id: null,
+            updated_at: new Date().toISOString(),
+          }).eq('id', game.id);
+          await supabase.from('players').update({
+            is_ready: false,
+            board: null,
+            last_seen_at: new Date().toISOString(),
+          }).eq('game_id', game.id);
+        }
+      }
+    } catch (err) {
+      console.warn('Rematch server sync note:', err);
+    }
+
+    // 3. Broadcast acceptance to opponent via Realtime channel
     if (channelRef.current) {
       channelRef.current.send({
         type: 'broadcast',
@@ -740,23 +775,7 @@ export function useBingoGame(initialRoomCode?: string) {
       }).catch(err => console.warn('Realtime rematch accept broadcast warning:', err));
     }
 
-    // 3. Call server-side rematch RPC
-    try {
-      const supabase = getSupabase();
-      if (supabase && isSupabaseConfigured()) {
-        const { error } = await supabase.rpc('rematch_game', {
-          p_game_id: game.id,
-          p_session_id: sessionId,
-        });
-        if (error && error.code !== 'PGRST202') {
-          console.warn('Server rematch RPC note:', error);
-        }
-      }
-    } catch (err) {
-      console.warn('Rematch RPC failed, using realtime reset fallback:', err);
-    } finally {
-      setLoading(false);
-    }
+    setLoading(false);
   }, [game?.id, game?.room_code, getSession, player?.id]);
 
   // ACTION: Request Rematch (Sends challenge notification to opponent)

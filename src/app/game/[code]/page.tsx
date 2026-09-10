@@ -9,6 +9,7 @@ import { ReconnectingModal } from '@/components/ReconnectingModal';
 import { useBingoGame } from '@/hooks/useBingoGame';
 import { clearActiveRoomCode } from '@/lib/gameEngine';
 import { useRouter } from 'next/navigation';
+import { sounds } from '@/components/AudioController';
 
 function GameRoomContent({ roomCode }: { roomCode: string }) {
   const router = useRouter();
@@ -63,6 +64,16 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
     router.push('/');
   };
 
+  // When rematch is rejected, redirect both players to home page
+  useEffect(() => {
+    if (rematchStatus === 'declined') {
+      sounds.playAlert();
+      clearActiveRoomCode();
+      resetGame();
+      router.push('/');
+    }
+  }, [rematchStatus, router]);
+
   const handleRematch = async () => {
     try {
       await requestRematch();
@@ -98,9 +109,10 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
           </div>
         )}
 
-        {/* Board Setup State (waiting/ready before play) */}
-        {game?.status !== 'playing' && game?.status !== 'completed' && (
+        {/* Board Setup State (waiting/ready before play, or when rematch accepted) */}
+        {(rematchStatus === 'accepted' || (game?.status !== 'playing' && game?.status !== 'completed')) && (
           <BoardSetupScreen
+            key={`setup_${game?.id || 'room'}_${game?.status}_${rematchStatus}`}
             initialAutoFill={true}
             onConfirmBoard={handleBoardConfirmed}
             onBack={handleExitToArena}
@@ -111,7 +123,7 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
         )}
 
         {/* Main Game State */}
-        {game?.status === 'playing' && (
+        {game?.status === 'playing' && rematchStatus !== 'accepted' && (
           player?.board ? (
             <MainGameScreen
               board={player.board}
@@ -133,8 +145,8 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
           )
         )}
 
-        {/* Victory State (Match completed: rematch keeps room code & context) */}
-        {game?.status === 'completed' && (
+        {/* Victory State (Match completed: only show if rematch is not accepted) */}
+        {game?.status === 'completed' && rematchStatus !== 'accepted' && (
           <VictoryScreen
             isWinner={isWinner}
             winnerName={winner?.display_name || 'Winner'}
@@ -147,7 +159,10 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
             rematchRequesterName={rematchRequesterName}
             onRematch={handleRematch}
             onAcceptRematch={acceptRematch}
-            onDeclineRematch={declineRematch}
+            onDeclineRematch={() => {
+              declineRematch();
+              handleExitToArena();
+            }}
             onCancelRematchRequest={cancelRematchRequest}
             onBackToHome={handleExitToArena}
           />

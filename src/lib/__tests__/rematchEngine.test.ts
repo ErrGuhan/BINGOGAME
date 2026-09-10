@@ -94,13 +94,19 @@ describe('Rematch Protocol & Match State Reset Engine', () => {
     expect(playerAState).toBe('requesting');
     expect(playerBState).toBe('received');
 
-    // Scenario 1: B declines
-    playerBState = 'idle';
+    // Scenario 1: B rejects
+    // Both players must redirect to home screen, active room code is cleared
+    setActiveRoomCode('XXQX');
+    playerBState = 'declined';
     playerAState = 'declined';
+    clearActiveRoomCode();
     expect(playerAState).toBe('declined');
-    expect(playerBState).toBe('idle');
+    expect(playerBState).toBe('declined');
+    expect(getActiveRoomCode()).toBeNull(); // Both redirected to home
 
-    // Scenario 2: Rematch requested again and B accepts
+    // Scenario 2: Rematch requested and B accepts
+    // Both players must redirect to board setup (number ordering) screen in same room
+    setActiveRoomCode('XXQX');
     playerAState = 'requesting';
     playerBState = 'received';
     // B accepts rematch
@@ -108,5 +114,6 @@ describe('Rematch Protocol & Match State Reset Engine', () => {
     playerAState = 'accepted';
     expect(playerAState).toBe('accepted');
     expect(playerBState).toBe('accepted');
+    expect(getActiveRoomCode()).toBe('XXQX'); // Same room code preserved
   });
 });
