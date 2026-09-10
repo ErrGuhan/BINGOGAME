@@ -1,9 +1,71 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { sounds } from './AudioController';
 import { generateRandomBoard } from '@/lib/gameEngine';
 import { BoardSize } from '@/types/bingo';
+
+// ─── Memoized board cell for BoardSetup ────────────────────────────────────────
+// Extracted so React.memo can bail out when a cell's props haven't changed.
+// On a 10x10 board a chip click previously re-rendered all 100 cells;
+// now only the one whose index, value, or selection changed re-renders.
+interface BoardSetupCellProps {
+  idx: number;
+  val: number | null;
+  isSelected: boolean;
+  isReady: boolean;
+  boardSize: BoardSize;
+  onClick: (idx: number) => void;
+}
+
+const BoardSetupCell = React.memo(function BoardSetupCell({
+  idx,
+  val,
+  isSelected,
+  isReady,
+  boardSize,
+  onClick,
+}: BoardSetupCellProps) {
+  const isFilled = val !== null;
+  return (
+    <button
+      key={idx}
+      type="button"
+      disabled={isReady}
+      onClick={() => onClick(idx)}
+      className={`relative aspect-square flex items-center justify-center transition-all ${
+        boardSize === 10 ? 'rounded-md' : 'rounded-xl'
+      } ${
+        isSelected
+          ? 'bg-surface-bright border-2 border-primary-container shadow-[0_0_16px_rgba(0,245,212,0.45)] text-primary-fixed scale-[1.03] z-10'
+          : isFilled
+          ? 'bg-surface-container-high/90 text-on-surface hover:bg-surface-bright font-black shadow-sm border border-outline-variant/20'
+          : 'bg-surface-container-high/40 text-on-surface-variant/30 border border-outline-variant/15 hover:bg-surface-container-high'
+      }`}
+    >
+      {isFilled ? (
+        <span
+          className={`font-black ${
+            boardSize === 10
+              ? 'text-[11px] sm:text-xs leading-none'
+              : 'text-base'
+          }`}
+        >
+          {val}
+        </span>
+      ) : (
+        <span
+          className={`material-symbols-outlined opacity-40 ${
+            boardSize === 10 ? 'text-[12px]' : 'text-[16px]'
+          }`}
+        >
+          add
+        </span>
+      )}
+    </button>
+  );
+});
+// ──────────────────────────────────────────────────────────────────────────────
 
 interface BoardSetupScreenProps {
   boardSize?: BoardSize;
@@ -60,7 +122,7 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
   const isComplete = placedCount === totalCells;
   const usedNumbers = useMemo(() => new Set(board.filter((v): v is number => v !== null)), [board]);
 
-  const handleCellClick = (idx: number) => {
+  const handleCellClick = useCallback((idx: number) => {
     if (isReady) return;
     sounds.playTap();
     if (board[idx] !== null) {
@@ -71,9 +133,9 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
     } else {
       setActiveIndex(idx);
     }
-  };
+  }, [board, isReady]);
 
-  const handleTrayChipClick = (num: number) => {
+  const handleTrayChipClick = useCallback((num: number) => {
     if (isReady || usedNumbers.has(num)) return;
 
     let target = activeIndex;
@@ -90,7 +152,7 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
     // Find next empty index
     const nextEmpty = nextBoard.findIndex(v => v === null);
     setActiveIndex(nextEmpty);
-  };
+  }, [board, isReady, usedNumbers, activeIndex]);
 
   const handleShuffle = () => {
     sounds.playLineComplete();
@@ -238,48 +300,17 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
           }`}
           id="bingo-matrix"
         >
-          {board.map((val, idx) => {
-            const isSelected = idx === activeIndex;
-            const isFilled = val !== null;
-
-            return (
-              <button
-                key={idx}
-                type="button"
-                disabled={isReady}
-                onClick={() => handleCellClick(idx)}
-                className={`relative aspect-square flex items-center justify-center transition-all ${
-                  boardSize === 10 ? 'rounded-md' : 'rounded-xl'
-                } ${
-                  isSelected
-                    ? 'bg-surface-bright border-2 border-primary-container shadow-[0_0_16px_rgba(0,245,212,0.45)] text-primary-fixed scale-[1.03] z-10'
-                    : isFilled
-                    ? 'bg-surface-container-high/90 text-on-surface hover:bg-surface-bright font-black shadow-sm border border-outline-variant/20'
-                    : 'bg-surface-container-high/40 text-on-surface-variant/30 border border-outline-variant/15 hover:bg-surface-container-high'
-                }`}
-              >
-                {isFilled ? (
-                  <span
-                    className={`font-black ${
-                      boardSize === 10
-                        ? 'text-[11px] sm:text-xs leading-none'
-                        : 'text-base'
-                    }`}
-                  >
-                    {val}
-                  </span>
-                ) : (
-                  <span
-                    className={`material-symbols-outlined opacity-40 ${
-                      boardSize === 10 ? 'text-[12px]' : 'text-[16px]'
-                    }`}
-                  >
-                    add
-                  </span>
-                )}
-              </button>
-            );
-          })}
+          {board.map((val, idx) => (
+            <BoardSetupCell
+              key={idx}
+              idx={idx}
+              val={val}
+              isSelected={idx === activeIndex}
+              isReady={isReady}
+              boardSize={boardSize}
+              onClick={handleCellClick}
+            />
+          ))}
         </div>
       </div>
 

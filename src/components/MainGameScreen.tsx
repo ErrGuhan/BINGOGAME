@@ -35,7 +35,6 @@ const BingoGridCell = React.memo(function BingoGridCell({
           onSelect(num);
         }
       }}
-      style={{ willChange: 'transform', transform: 'translateZ(0)' }}
       className={`aspect-square flex flex-col items-center justify-center relative transition-all ${
         is10 ? 'rounded-md p-0' : 'rounded-xl'
       } ${
@@ -93,7 +92,6 @@ const CallerPadTile = React.memo(function CallerPadTile({
         sounds.playTap();
         onSelect(num);
       }}
-      style={{ willChange: 'transform', transform: 'translateZ(0)' }}
       className={`h-7 sm:h-8 rounded-lg font-label-md text-xs flex items-center justify-center transition-all ${
         isCalled
           ? 'bg-surface-container-lowest/40 text-on-surface-variant/30 line-through cursor-not-allowed'
@@ -173,6 +171,14 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
     return calculateLines(board, Array.from(calledNumbersSet), boardSize);
   }, [board, calledNumbersSet, boardSize]);
 
+  // Pre-compute a flat Set of winning cell indices for O(1) lookup in render.
+  // Replaces the previous O(lines × cells) completedLines.some(line=>line.includes(idx))
+  // which was running up to 2,200 array searches per render on a full 10x10 board.
+  const winningCellIndices = useMemo(
+    () => new Set(completedLines.flat()),
+    [completedLines]
+  );
+
   // Pre-select first available number on board when it becomes player's turn
   useEffect(() => {
     if (isMyTurn && (selectedNumber === null || calledNumbersSet.has(selectedNumber))) {
@@ -183,8 +189,9 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
     }
   }, [isMyTurn, calledNumbersSet, board, selectedNumber, allNumbers]);
 
-  // Handle number call submission
-  const handleExecuteCall = async () => {
+  // Handle number call submission — memoized so the Call button skips re-renders
+  // when isMyTurn, selectedNumber, isCalling, and loading are all unchanged.
+  const handleExecuteCall = useCallback(async () => {
     if (!isMyTurn || selectedNumber === null || isCalling || loading) return;
     if (calledNumbersSet.has(selectedNumber)) return;
 
@@ -194,7 +201,7 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
     } finally {
       setIsCalling(false);
     }
-  };
+  }, [isMyTurn, selectedNumber, isCalling, loading, calledNumbersSet, onCallNumber]);
 
   const latestCall = calledNumbers.length > 0 ? calledNumbers[calledNumbers.length - 1] : null;
   const historyCalls = calledNumbers.slice(0, -1).reverse();
@@ -376,7 +383,7 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
                 key={idx}
                 num={num}
                 isMarked={calledNumbersSet.has(num)}
-                isWinningCell={completedLines.some(line => line.includes(idx))}
+                isWinningCell={winningCellIndices.has(idx)}
                 isSelected={selectedNumber === num}
                 isMyTurn={isMyTurn}
                 boardSize={boardSize}

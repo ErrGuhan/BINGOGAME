@@ -194,9 +194,25 @@ export function useBingoGame(initialRoomCode?: string) {
     }
   }, []);
 
-  // Fetch full game state from source of truth in Supabase
+  // Leading-edge debounce timer: coalesces duplicate syncGameState calls
+  // that fire simultaneously from the postgres_changes listener AND the
+  // polling interval (both trigger on every NUMBER_CALLED event).
+  const syncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fetch full game state from source of truth in Supabase.
+  // Uses leading-edge debounce (150 ms window): the FIRST call in a burst
+  // fires immediately; any subsequent calls within 150 ms are dropped.
+  // This prevents the race condition where two parallel get_game_state RPCs
+  // race each other and the slower one overwrites the result with stale data.
   const syncGameState = useCallback(async (gameId: string) => {
     if (!gameId) return;
+
+    // Leading-edge debounce: fire now, ignore duplicates for 150 ms
+    if (syncDebounceRef.current) return;   // already in debounce window
+    syncDebounceRef.current = setTimeout(() => {
+      syncDebounceRef.current = null;       // reopen the window after 150 ms
+    }, 150);
+
     const sessionId = getSession();
     const supabase = getSupabase();
 
