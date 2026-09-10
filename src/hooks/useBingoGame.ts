@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Game, Player, CalledNumber, GameStateSnapshot, CallNumberResult, BoardSize } from '@/types/bingo';
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase';
-import { getSessionId, getPlayerName, setPlayerName, setActiveRoomCode, clearActiveRoomCode } from '@/lib/gameEngine';
+import { getSessionId, getPlayerName, setPlayerName, setActiveRoomCode, clearActiveRoomCode, calculateLines } from '@/lib/gameEngine';
 import { sounds } from '@/components/AudioController';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -76,7 +76,9 @@ export function useBingoGame(initialRoomCode?: string) {
   const opponentLines = isHost ? (p2?.lines_completed || 0) : (p1?.lines_completed || 0);
 
   const boardSize: BoardSize = (game?.board_size === 10 ? 10 : 5);
-  const targetLines: number = boardSize === 10 ? 10 : 5;
+  // Always prefer the authoritative DB value; fall back to board-size derivation
+  // only when the game object hasn't loaded yet.
+  const targetLines: number = game?.target_lines || (boardSize === 10 ? 10 : 5);
 
   // Sync state from snapshot
   const applySnapshot = useCallback((snapshot: GameStateSnapshot | null) => {
@@ -324,7 +326,9 @@ export function useBingoGame(initialRoomCode?: string) {
       sounds.playDraft(520);
       matchEpochRef.current += 1;
       const d = data as { boardSize?: BoardSize; matchEpoch?: number };
-      const nextBoardSize: BoardSize = (d?.boardSize === 10 ? 10 : 5) || (gameRef.current?.board_size === 10 ? 10 : 5);
+      const nextBoardSize: BoardSize = (d?.boardSize === 10 || d?.boardSize === 5)
+        ? d.boardSize
+        : (gameRef.current?.board_size === 10 ? 10 : 5);
       const nextTarget = nextBoardSize === 10 ? 10 : 5;
 
       setRematchStatus('accepted');
@@ -808,6 +812,11 @@ export function useBingoGame(initialRoomCode?: string) {
     setError(null);
     const sessionId = getSession();
 
+    // Capture board size from game at call-time to avoid stale closure bugs
+    // (game.board_size is the authoritative value; boardSize in outer scope may lag)
+    const currentGameBoardSize: BoardSize = game.board_size === 10 ? 10 : 5;
+    const expectedCellCount = currentGameBoardSize * currentGameBoardSize;
+
     // 1. Immediately store board in local state to eliminate race condition on game start
     setPlayer(prev => prev ? { ...prev, board, is_ready: true } : null);
     if (player?.player_number === 1) {
@@ -822,6 +831,16 @@ export function useBingoGame(initialRoomCode?: string) {
         throw new Error('Supabase is not configured. Please check your environment variables in .env.local.');
       }
 
+      // Guard: ensure the board we're submitting matches what the game expects.
+      // This catches client/server mode-mismatch before hitting the network.
+      if (board.length !== expectedCellCount) {
+        throw new Error(
+          `Board has ${board.length} numbers but the game expects ${expectedCellCount} ` +
+          `(${currentGameBoardSize}x${currentGameBoardSize} mode). ` +
+          `Please clear and re-fill your board.`
+        );
+      }
+
       let rpcData: any = null;
       let rpcSuccess = false;
 
@@ -833,19 +852,25 @@ export function useBingoGame(initialRoomCode?: string) {
       });
 
       if (res.error) {
-        // If DB expects 25 numbers (legacy schema on 10x10), fallback to sending 25 numbers so DB marks is_ready
-        if (res.error.message?.includes('25 numbers') && board.length === 100) {
-          const slice25 = Array.from({ length: 25 }, (_, i) => i + 1);
-          const fallbackRes = await supabase.rpc('set_player_board', {
-            p_game_id: game.id,
-            p_session_id: sessionId,
-            p_board: slice25,
-          });
-          if (!fallbackRes.error) {
-            rpcData = fallbackRes.data;
-            rpcSuccess = true;
-          }
+        // If the server rejected the board because it expected a different count, it almost
+        // always means the Supabase migration_10x10.sql has not been applied yet.
+        // We must NOT silently send a fake fallback board — that would corrupt game state.
+        // Instead, surface a clear, actionable error to the player.
+        const isBoardCountMismatch =
+          res.error.message?.toLowerCase().includes('exactly') ||
+          res.error.message?.toLowerCase().includes('numbers') ||
+          res.error.code === '22023' || // invalid_parameter_value (postgres)
+          res.error.code === 'P0001';   // raise_exception (plpgsql)
+
+        if (isBoardCountMismatch && board.length === 100) {
+          throw new Error(
+            '10x10 mode requires a database upgrade. ' +
+            'Please run supabase/migration_10x10.sql in your Supabase SQL Editor, then refresh and try again.'
+          );
         }
+
+        // For any other server error, re-throw so the user sees it
+        throw res.error;
       } else {
         rpcData = res.data;
         rpcSuccess = true;
@@ -874,7 +899,7 @@ export function useBingoGame(initialRoomCode?: string) {
           allReady: isAllReady,
           status: isAllReady ? 'playing' : 'ready',
           currentTurnPlayerId: turnId,
-          boardSize: boardSize,
+          boardSize: currentGameBoardSize,
         },
       }).catch(() => {});
 
@@ -885,11 +910,22 @@ export function useBingoGame(initialRoomCode?: string) {
         syncGameState(game.id).catch(() => {});
       }
     } catch (err: unknown) {
-      console.warn('setBoard note:', err);
+      // Surface errors to the UI — a silent console.warn means players never know
+      // why "Lock Board & Play" appears to do nothing.
+      const msg = (err as Error).message || 'Failed to lock board';
+      console.error('[setBoard] error:', msg, err);
+      setError(msg);
+      // Roll back the optimistic ready state so the player can retry
+      setPlayer(prev => prev ? { ...prev, is_ready: false } : null);
+      if (player?.player_number === 1) {
+        setP1(prev => prev ? { ...prev, is_ready: false } : null);
+      } else if (player?.player_number === 2) {
+        setP2(prev => prev ? { ...prev, is_ready: false } : null);
+      }
     } finally {
       setLoading(false);
     }
-  }, [boardSize, game?.id, getSession, opponent?.id, player?.id, player?.player_number, syncGameState]);
+  }, [game?.id, game?.board_size, getSession, opponent?.id, player?.id, player?.player_number, syncGameState]);
 
   // ACTION: Call Number (Supabase Server-Side Strict Alternating Turns & Client Fallback)
   const callNumber = useCallback(async (number: number) => {

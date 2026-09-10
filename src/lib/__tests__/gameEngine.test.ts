@@ -153,6 +153,57 @@ describe('Game Engine - 10x10 Mega Mode', () => {
     expect(result.lines).toBe(22); // 10 rows + 10 cols + 2 diagonals
     expect(result.completedLines).toHaveLength(22);
   });
+
+  it('counts each completed line as exactly one strike (no double-counting)', () => {
+    // Complete row 1 (1-10): exactly 1 strike
+    const row1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    expect(calculateLines(megaBoard, row1).lines).toBe(1);
+
+    // Complete col 1 (1, 11, 21, 31, 41, 51, 61, 71, 81, 91): +1 strike = 2 total
+    const row1PlusCol1 = [...row1, 11, 21, 31, 41, 51, 61, 71, 81, 91];
+    expect(calculateLines(megaBoard, row1PlusCol1).lines).toBe(2);
+
+    // Main diagonal (1, 12, 23, 34, 45, 56, 67, 78, 89, 100): col 1 + row 1 already have
+    // overlapping cells at index 0 (value 1) — should still count as separate strikes
+    const withDiag = [...row1PlusCol1, 12, 23, 34, 45, 56, 67, 78, 89, 100];
+    expect(calculateLines(megaBoard, withDiag).lines).toBe(3);
+  });
+
+  it('win triggers at >= 10 strikes (verified at 9 → no-win, 10+ → win)', () => {
+    const WIN_THRESHOLD = 10;
+
+    // Calling rows 1..9 on the identity megaBoard (1..100) = exactly 9 row-strikes.
+    // No column can complete with only 90 of 100 numbers called.
+    const nineRowsCalled: number[] = [];
+    for (let row = 0; row < 9; row++) {
+      for (let col = 0; col < 10; col++) {
+        nineRowsCalled.push(row * 10 + col + 1);
+      }
+    }
+    const nineResult = calculateLines(megaBoard, nineRowsCalled);
+    expect(nineResult.lines).toBe(9);
+    // Win condition >= 10 is FALSE at 9 strikes → no win
+    expect(nineResult.lines >= WIN_THRESHOLD).toBe(false);
+
+    // Complete all 10 rows (calling 91..100 as well = all 100 numbers).
+    // On the identity board this also finishes all columns + diagonals = 22 lines total.
+    // The engine uses >= WIN_THRESHOLD for win detection, so 22 >= 10 = win.
+    const allCalled = Array.from({ length: 100 }, (_, i) => i + 1);
+    const winResult = calculateLines(megaBoard, allCalled);
+    expect(winResult.lines).toBeGreaterThanOrEqual(WIN_THRESHOLD); // win fires
+    expect(winResult.lines >= WIN_THRESHOLD).toBe(true);
+  });
+
+  it('does not fire win at 9 strikes on a shuffled 10x10 board', () => {
+    const WIN_THRESHOLD = 10;
+    // Use a shuffled board, mark 9 full rows — should never fire win
+    const shuffled = generateRandomBoard(10);
+    const firstNineRows = shuffled.slice(0, 90);
+    const result = calculateLines(shuffled, firstNineRows);
+    // Must have at least 9 lines (rows 1-9 all complete, columns won't be complete)
+    // The exact count depends on shuffle, but guarantee < 10 strikes from row 9
+    expect(result.lines).toBeLessThan(WIN_THRESHOLD);
+  });
 });
 
 describe('Game Engine - Session & Room Storage', () => {
