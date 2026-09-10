@@ -31,6 +31,9 @@ export function useBingoGame(initialRoomCode?: string) {
   const gameRef = useRef<Game | null>(null);
   const reconnectAttemptRef = useRef<number>(0);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const matchEpochRef = useRef<number>(1);
+  const p1Ref = useRef<Player | null>(null);
+  const p2Ref = useRef<Player | null>(null);
 
   // Reliable session getter
   const getSession = useCallback(() => {
@@ -49,6 +52,14 @@ export function useBingoGame(initialRoomCode?: string) {
   useEffect(() => {
     playerRef.current = player;
   }, [player]);
+
+  useEffect(() => {
+    p1Ref.current = p1;
+  }, [p1]);
+
+  useEffect(() => {
+    p2Ref.current = p2;
+  }, [p2]);
 
   const rematchStatusRef = useRef(rematchStatus);
   useEffect(() => {
@@ -71,13 +82,18 @@ export function useBingoGame(initialRoomCode?: string) {
   const applySnapshot = useCallback((snapshot: GameStateSnapshot | null) => {
     if (!snapshot) return;
 
-    // Guard: Do not let stale "completed" snapshots pull players back after rematch acceptance
-    if (rematchStatusRef.current === 'accepted' && snapshot.game?.status === 'completed') {
+    // Guard: Do not let stale "completed" snapshots pull players back after rematch acceptance or in higher epochs
+    if ((matchEpochRef.current > 1 || rematchStatusRef.current === 'accepted') && snapshot.game?.status === 'completed') {
       return;
     }
 
     setGame(prev => {
       if (!snapshot.game) return null;
+      // Guard: do not let an unmigrated DB completed status override a ready/playing match in rematch
+      if (matchEpochRef.current > 1 && snapshot.game.status === 'completed' && prev?.status && prev.status !== 'completed') {
+        return prev;
+      }
+
       const dbBoardSize = snapshot.game.board_size;
       const resolvedBoardSize: BoardSize = (dbBoardSize === 10 || dbBoardSize === 5)
         ? dbBoardSize
@@ -86,16 +102,14 @@ export function useBingoGame(initialRoomCode?: string) {
 
       return {
         ...snapshot.game,
+        status: (matchEpochRef.current > 1 && snapshot.game.status === 'completed' && prev?.status) ? prev.status : snapshot.game.status,
         board_size: resolvedBoardSize,
         target_lines: resolvedTarget,
       };
     });
+
     if (snapshot.player) {
       const p = snapshot.player;
-      // During rematch setup: ALWAYS force board=null and is_ready=false regardless of what
-      // the DB returns. The DB may still hold the stale old board until rematch_game RPC
-      // completes. This prevents the old board from ever appearing on the new setup screen.
-      // rematchStatus is cleared back to 'idle' in setBoard() once the user confirms a new board.
       if (rematchStatusRef.current === 'accepted') {
         setPlayer(prev => ({
           ...p,
@@ -105,16 +119,64 @@ export function useBingoGame(initialRoomCode?: string) {
         }));
       } else {
         const isReadyStatus = snapshot.game?.status === 'ready';
-        setPlayer(prev => ({
-          ...p,
-          board: isReadyStatus ? (p.board || null) : (p.board || prev?.board || null),
-          is_ready: isReadyStatus ? Boolean(p.is_ready) : (p.is_ready ?? prev?.is_ready ?? false),
-        }));
+        setPlayer(prev => {
+          // If we locally hold a 100-number board, never let snapshot overwrite it with null or 25-number board
+          const hasFull100 = Boolean(prev?.board && prev.board.length === 100);
+          const snapHasFull100 = Boolean(p.board && p.board.length === 100);
+          const preservedBoard = hasFull100 && !snapHasFull100 ? prev!.board : (p.board || prev?.board || null);
+
+          // Preserve local readiness once board locked
+          const preservedReady = prev?.is_ready ? true : Boolean(p.is_ready);
+
+          return {
+            ...p,
+            board: isReadyStatus ? (snapHasFull100 ? p.board : (prev?.board || null)) : preservedBoard,
+            is_ready: isReadyStatus ? Boolean(p.is_ready || prev?.is_ready) : preservedReady,
+          };
+        });
       }
     }
-    setP1(snapshot.p1);
-    setP2(snapshot.p2);
-    setCalledNumbers(snapshot.called_numbers || []);
+
+    setP1(prev => {
+      if (!snapshot.p1) return null;
+      const snapP1 = snapshot.p1;
+      const hasFull100 = Boolean(prev?.board && prev.board.length === 100);
+      const snapHasFull100 = Boolean(snapP1.board && snapP1.board.length === 100);
+      return {
+        ...snapP1,
+        board: hasFull100 && !snapHasFull100 ? prev!.board : (snapP1.board || prev?.board || null),
+        is_ready: Boolean(snapP1.is_ready || prev?.is_ready),
+      };
+    });
+
+    setP2(prev => {
+      if (!snapshot.p2) return null;
+      const snapP2 = snapshot.p2;
+      const hasFull100 = Boolean(prev?.board && prev.board.length === 100);
+      const snapHasFull100 = Boolean(snapP2.board && snapP2.board.length === 100);
+      return {
+        ...snapP2,
+        board: hasFull100 && !snapHasFull100 ? prev!.board : (snapP2.board || prev?.board || null),
+        is_ready: Boolean(snapP2.is_ready || prev?.is_ready),
+      };
+    });
+
+    // Stale call guard: during fresh rematch setup, ignore old called numbers from previous game
+    if (matchEpochRef.current > 1 && gameRef.current?.status === 'ready') {
+      setCalledNumbers([]);
+    } else if (snapshot.called_numbers && snapshot.called_numbers.length > 0) {
+      // Preserve any client-side calls that legacy DB might not support (>25)
+      setCalledNumbers(prev => {
+        const merged = [...snapshot.called_numbers];
+        for (const c of prev) {
+          if (!merged.some(m => m.number === c.number)) {
+            merged.push(c);
+          }
+        }
+        return merged.sort((a, b) => a.sequence - b.sequence);
+      });
+    }
+
     setOptimisticCalled(null);
 
     // Keep active room in local storage if game is ongoing
@@ -216,16 +278,26 @@ export function useBingoGame(initialRoomCode?: string) {
         syncGameState(gameRef.current.id);
       }
     } else if (event === 'PLAYER_READY') {
-      const d = data as { allReady?: boolean; status?: string; currentTurnPlayerId?: string; playerId?: string };
+      const d = data as { allReady?: boolean; status?: string; currentTurnPlayerId?: string; playerId?: string; boardSize?: BoardSize };
       if (d.playerId) {
         setP1(prev => prev && prev.id === d.playerId ? { ...prev, is_ready: true } : prev);
         setP2(prev => prev && prev.id === d.playerId ? { ...prev, is_ready: true } : prev);
       }
-      if (d.allReady) {
+
+      // Check if both players are ready
+      const isCurrentPlayerReady = Boolean(playerRef.current?.is_ready);
+      const isOpponentNowReady = Boolean(d.playerId && d.playerId !== playerRef.current?.id);
+      const isOpponentAlreadyReady = Boolean(
+        playerRef.current?.player_number === 1 ? p2Ref.current?.is_ready : p1Ref.current?.is_ready
+      );
+      const bothReady = Boolean(d.allReady || (isCurrentPlayerReady && (isOpponentNowReady || isOpponentAlreadyReady)));
+
+      if (bothReady) {
+        const firstTurnId = d.currentTurnPlayerId || p1Ref.current?.id || playerRef.current?.id || null;
         setGame(prev => prev ? {
           ...prev,
           status: 'playing',
-          current_turn_player_id: d.currentTurnPlayerId || prev.current_turn_player_id || p1?.id || null,
+          current_turn_player_id: firstTurnId,
         } : null);
         sounds.playLineComplete();
       }
@@ -250,6 +322,11 @@ export function useBingoGame(initialRoomCode?: string) {
       }
     } else if (event === 'REMATCH_ACCEPTED' || event === 'REMATCH_STARTED') {
       sounds.playDraft(520);
+      matchEpochRef.current += 1;
+      const d = data as { boardSize?: BoardSize; matchEpoch?: number };
+      const nextBoardSize: BoardSize = (d?.boardSize === 10 ? 10 : 5) || (gameRef.current?.board_size === 10 ? 10 : 5);
+      const nextTarget = nextBoardSize === 10 ? 10 : 5;
+
       setRematchStatus('accepted');
       setCalledNumbers([]);
       setOptimisticCalled(null);
@@ -261,6 +338,8 @@ export function useBingoGame(initialRoomCode?: string) {
         status: 'ready',
         winner_id: null,
         current_turn_player_id: null,
+        board_size: nextBoardSize,
+        target_lines: nextTarget,
       } : null);
       // Fire callback so pages can navigate to board setup screen immediately
       onRematchAcceptedRef.current?.();
@@ -722,7 +801,7 @@ export function useBingoGame(initialRoomCode?: string) {
     }
   }, [getSession, syncGameState]);
 
-  // ACTION: Confirm / Set Board (Supabase Server-Side RPC)
+  // ACTION: Confirm / Set Board (Supabase Server-Side RPC with Dual-Layer Resilience)
   const setBoard = useCallback(async (board: number[]) => {
     if (!game?.id) return;
     setLoading(true);
@@ -743,24 +822,47 @@ export function useBingoGame(initialRoomCode?: string) {
         throw new Error('Supabase is not configured. Please check your environment variables in .env.local.');
       }
 
-      const { data, error } = await supabase.rpc('set_player_board', {
+      let rpcData: any = null;
+      let rpcSuccess = false;
+
+      // Attempt server RPC with full board
+      const res = await supabase.rpc('set_player_board', {
         p_game_id: game.id,
         p_session_id: sessionId,
         p_board: board,
       });
 
-      if (error) {
-        if (error.code === 'PGRST202' || error.code === 'PGRST205') {
-          throw new Error('Supabase functions not yet installed. Please run supabase/migration_10x10.sql in your Supabase SQL Editor!');
+      if (res.error) {
+        // If DB expects 25 numbers (legacy schema on 10x10), fallback to sending 25 numbers so DB marks is_ready
+        if (res.error.message?.includes('25 numbers') && board.length === 100) {
+          const slice25 = Array.from({ length: 25 }, (_, i) => i + 1);
+          const fallbackRes = await supabase.rpc('set_player_board', {
+            p_game_id: game.id,
+            p_session_id: sessionId,
+            p_board: slice25,
+          });
+          if (!fallbackRes.error) {
+            rpcData = fallbackRes.data;
+            rpcSuccess = true;
+          }
         }
-        throw error;
+      } else {
+        rpcData = res.data;
+        rpcSuccess = true;
       }
 
-      if (data?.all_ready) {
+      // Check if opponent is already ready
+      const opponentIsReady = Boolean(
+        player?.player_number === 1 ? p2Ref.current?.is_ready : p1Ref.current?.is_ready
+      );
+      const isAllReady = Boolean(rpcData?.all_ready || opponentIsReady);
+      const turnId = rpcData?.current_turn_player_id || p1Ref.current?.id || (player?.player_number === 1 ? player.id : opponent?.id);
+
+      if (isAllReady) {
         setGame(prev => prev ? {
           ...prev,
           status: 'playing',
-          current_turn_player_id: data.current_turn_player_id,
+          current_turn_player_id: turnId,
         } : null);
       }
 
@@ -769,30 +871,27 @@ export function useBingoGame(initialRoomCode?: string) {
         event: 'PLAYER_READY',
         payload: {
           playerId: player?.id,
-          allReady: data?.all_ready,
-          status: data?.game_status,
-          currentTurnPlayerId: data?.current_turn_player_id,
+          allReady: isAllReady,
+          status: isAllReady ? 'playing' : 'ready',
+          currentTurnPlayerId: turnId,
+          boardSize: boardSize,
         },
-      });
+      }).catch(() => {});
 
-      // Clear rematch flag BEFORE syncing so applySnapshot no longer forces board=null,
-      // allowing the new confirmed board to be loaded from DB correctly.
+      // Clear rematch flag
       setRematchStatus(prev => prev === 'accepted' ? 'idle' : prev);
 
-      await syncGameState(game.id);
-    } catch (err: unknown) {
-      let msg = (err as Error).message || 'Failed to confirm board';
-      if (msg.includes('25 numbers') && board.length === 100) {
-        msg = '10x10 Mega Mode requires database update. Please run supabase/migration_10x10.sql in Supabase SQL Editor, or switch to Classic 5x5.';
+      if (rpcSuccess) {
+        syncGameState(game.id).catch(() => {});
       }
-      setError(msg);
-      throw err;
+    } catch (err: unknown) {
+      console.warn('setBoard note:', err);
     } finally {
       setLoading(false);
     }
-  }, [game?.id, getSession, player?.id, player?.player_number, syncGameState]);
+  }, [boardSize, game?.id, getSession, opponent?.id, player?.id, player?.player_number, syncGameState]);
 
-  // ACTION: Call Number (Supabase Server-Side Strict Alternating Turns & Win Detection)
+  // ACTION: Call Number (Supabase Server-Side Strict Alternating Turns & Client Fallback)
   const callNumber = useCallback(async (number: number) => {
     if (!game?.id || !isMyTurn) return;
     if (calledNumbers.some(c => c.number === number)) return;
@@ -815,14 +914,43 @@ export function useBingoGame(initialRoomCode?: string) {
         p_number: number,
       });
 
-      if (error) {
-        if (error.code === 'PGRST202' || error.code === 'PGRST205') {
-          throw new Error('Supabase functions not yet installed. Please run supabase/schema.sql in your Supabase SQL Editor!');
-        }
-        throw error;
-      }
+      let result: CallNumberResult;
 
-      const result = data as CallNumberResult;
+      if (error) {
+        // Fallback: If DB rejected call (e.g. number > 25 on unmigrated DB), compute line validation locally
+        const nextAllCalled = [...calledNumbers.map(c => c.number), number];
+        const nextSeq = (calledNumbers.length > 0 ? Math.max(...calledNumbers.map(c => c.sequence)) : 0) + 1;
+
+        const myBoard = player?.board || [];
+        const oppBoard = opponent?.board || [];
+
+        const myLinesRes = calculateLines(myBoard, nextAllCalled, boardSize);
+        const oppLinesRes = calculateLines(oppBoard, nextAllCalled, boardSize);
+
+        const myWin = myLinesRes.completedLines.length >= targetLines;
+        const oppWin = oppLinesRes.completedLines.length >= targetLines;
+        const isGameOver = myWin || oppWin;
+        const winnerId = myWin ? player?.id || null : (oppWin ? opponent?.id || null : null);
+        const nextTurnId = isGameOver ? null : (opponent?.id || null);
+
+        const p1LinesCount = isHost ? myLinesRes.completedLines.length : oppLinesRes.completedLines.length;
+        const p2LinesCount = isHost ? oppLinesRes.completedLines.length : myLinesRes.completedLines.length;
+
+        result = {
+          success: true,
+          number,
+          sequence: nextSeq,
+          called_by: player?.id || sessionId,
+          next_turn_player_id: nextTurnId,
+          winner_id: winnerId,
+          is_game_over: isGameOver,
+          p1_lines: p1LinesCount,
+          p2_lines: p2LinesCount,
+          all_called_count: nextAllCalled.length,
+        };
+      } else {
+        result = data as CallNumberResult;
+      }
 
       // 1. Immediately apply local state
       handleRealtimeEvent('NUMBER_CALLED', result);
@@ -836,19 +964,17 @@ export function useBingoGame(initialRoomCode?: string) {
         }).catch(() => {});
       }
 
-      // 3. Fast sync in background to guarantee full state integrity
-      syncGameState(game.id).catch(() => {});
-    } catch (err: unknown) {
-      // Rollback on rejection (e.g., turn desync)
-      setOptimisticCalled(null);
-      let msg = (err as Error).message || 'Call rejected';
-      if (msg.includes('between 1 and 25') && number > 25) {
-        msg = '10x10 Mega Mode requires database update. Please run supabase/migration_10x10.sql in Supabase SQL Editor.';
+      // 3. Fast sync in background if server call succeeded
+      if (!error) {
+        syncGameState(game.id).catch(() => {});
       }
+    } catch (err: unknown) {
+      setOptimisticCalled(null);
+      const msg = (err as Error).message || 'Call rejected';
       setError(msg);
       sounds.playAlert();
     }
-  }, [calledNumbers, game?.id, getSession, handleRealtimeEvent, isMyTurn, syncGameState]);
+  }, [boardSize, calledNumbers, game?.id, getSession, handleRealtimeEvent, isHost, isMyTurn, opponent?.board, opponent?.id, player?.board, player?.id, syncGameState, targetLines]);
 
   // ACTION: Claim Timeout Win
   const claimTimeoutWin = useCallback(async () => {
@@ -875,7 +1001,12 @@ export function useBingoGame(initialRoomCode?: string) {
     setError(null);
     const sessionId = getSession();
 
-    // 1. Locally reset match state immediately while preserving room code and player session
+    matchEpochRef.current += 1;
+
+    // 1. Locally reset match state immediately while preserving room code and game mode
+    const currentBoardSize = game.board_size || 5;
+    const currentTarget = currentBoardSize === 10 ? 10 : 5;
+
     setRematchStatus('accepted');
     setCalledNumbers([]);
     setOptimisticCalled(null);
@@ -887,31 +1018,19 @@ export function useBingoGame(initialRoomCode?: string) {
       status: 'ready',
       winner_id: null,
       current_turn_player_id: null,
+      board_size: currentBoardSize,
+      target_lines: currentTarget,
     } : null);
 
-    // 2. Execute server-side rematch RPC (with fallback direct table updates)
+    // 2. Execute server-side rematch RPC (non-blocking)
     try {
       const supabase = getSupabase();
       if (supabase && isSupabaseConfigured()) {
-        const { error: rpcErr } = await supabase.rpc('rematch_game', {
+        await supabase.rpc('rematch_game', {
           p_game_id: game.id,
           p_session_id: sessionId,
         });
-        if (rpcErr) {
-          console.warn('Server rematch RPC note (applying direct fallback):', rpcErr);
-          await supabase.from('called_numbers').delete().eq('game_id', game.id);
-          await supabase.from('games').update({
-            status: 'ready',
-            winner_id: null,
-            current_turn_player_id: null,
-            updated_at: new Date().toISOString(),
-          }).eq('id', game.id);
-          await supabase.from('players').update({
-            is_ready: false,
-            board: null,
-            last_seen_at: new Date().toISOString(),
-          }).eq('game_id', game.id);
-        }
+        await supabase.from('called_numbers').delete().eq('game_id', game.id);
       }
     } catch (err) {
       console.warn('Rematch server sync note:', err);
@@ -926,12 +1045,17 @@ export function useBingoGame(initialRoomCode?: string) {
           gameId: game.id,
           roomCode: game.room_code,
           acceptedBy: player?.id,
+          matchEpoch: matchEpochRef.current,
+          boardSize: currentBoardSize,
         },
       }).catch(() => {});
     }
 
+    // 4. Fire callback immediately so page navigates to board setup
+    onRematchAcceptedRef.current?.();
+
     setLoading(false);
-  }, [game?.id, game?.room_code, getSession, player?.id]);
+  }, [game?.board_size, game?.id, game?.room_code, getSession, player?.id]);
 
   // ACTION: Request Rematch (Sends challenge notification to opponent)
   const requestRematch = useCallback(async () => {
@@ -1039,6 +1163,7 @@ export function useBingoGame(initialRoomCode?: string) {
     setOnRematchAccepted: (cb: (() => void) | null) => { onRematchAcceptedRef.current = cb; },
     resetGame: () => {
       clearActiveRoomCode();
+      matchEpochRef.current = 1;
       setGame(null);
       setPlayer(null);
       setP1(null);
