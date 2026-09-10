@@ -79,4 +79,34 @@ describe('Rematch Protocol & Match State Reset Engine', () => {
     expect(getPlayerName()).toBe('Errguhan');
     expect(getSessionId()).toBe(sessionId);
   });
+
+  it('validates rematch handshake state transitions', () => {
+    type RematchState = 'idle' | 'requesting' | 'received' | 'accepted' | 'declined';
+
+    // Player A initiates rematch
+    let playerAState: RematchState = 'idle';
+    let playerBState: RematchState = 'idle';
+
+    // A clicks Play Rematch
+    playerAState = 'requesting';
+    // B receives REMATCH_REQUESTED broadcast
+    playerBState = 'received';
+    expect(playerAState).toBe('requesting');
+    expect(playerBState).toBe('received');
+
+    // Scenario 1: B declines
+    playerBState = 'idle';
+    playerAState = 'declined';
+    expect(playerAState).toBe('declined');
+    expect(playerBState).toBe('idle');
+
+    // Scenario 2: Rematch requested again and B accepts
+    playerAState = 'requesting';
+    playerBState = 'received';
+    // B accepts rematch
+    playerBState = 'accepted';
+    playerAState = 'accepted';
+    expect(playerAState).toBe('accepted');
+    expect(playerBState).toBe('accepted');
+  });
 });

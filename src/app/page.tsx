@@ -44,6 +44,11 @@ export default function App() {
     callNumber,
     claimTimeoutWin,
     requestRematch,
+    acceptRematch,
+    declineRematch,
+    cancelRematchRequest,
+    rematchStatus,
+    rematchRequesterName,
     resetGame,
   } = useBingoGame();
 
@@ -85,6 +90,13 @@ export default function App() {
       setScreen('victory');
     }
   }, [game?.status, player?.is_ready, player?.player_number, screen]);
+
+  // Auto-navigate to setup when rematch is accepted
+  React.useEffect(() => {
+    if (rematchStatus === 'accepted') {
+      setScreen('setup');
+    }
+  }, [rematchStatus]);
 
   // Handle Home -> Create Game
   const handleStartCreate = async () => {
@@ -140,10 +152,9 @@ export default function App() {
     }
   };
 
-  // Handle Rematch (keeps room code, player session, and transitions to board setup)
+  // Handle Rematch (sends challenge request to opponent)
   const handleRematch = async () => {
     sounds.playTap();
-    setScreen('setup');
     try {
       await requestRematch();
     } catch (err) {
@@ -261,7 +272,15 @@ export default function App() {
             myLines={myLines}
             opponentLines={opponentLines}
             totalCalls={calledNumbers.length}
+            rematchStatus={rematchStatus}
+            rematchRequesterName={rematchRequesterName}
             onRematch={handleRematch}
+            onAcceptRematch={async () => {
+              await acceptRematch();
+              setScreen('setup');
+            }}
+            onDeclineRematch={declineRematch}
+            onCancelRematchRequest={cancelRematchRequest}
             onBackToHome={handleBackToHome}
           />
         )}

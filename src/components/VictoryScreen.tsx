@@ -12,7 +12,12 @@ interface VictoryScreenProps {
   myLines: number;
   opponentLines: number;
   totalCalls: number;
+  rematchStatus?: 'idle' | 'requesting' | 'received' | 'accepted' | 'declined';
+  rematchRequesterName?: string | null;
   onRematch: () => void;
+  onAcceptRematch?: () => void;
+  onDeclineRematch?: () => void;
+  onCancelRematchRequest?: () => void;
   onBackToHome: () => void;
 }
 
@@ -24,7 +29,12 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
   myLines,
   opponentLines,
   totalCalls,
+  rematchStatus = 'idle',
+  rematchRequesterName,
   onRematch,
+  onAcceptRematch,
+  onDeclineRematch,
+  onCancelRematchRequest,
   onBackToHome,
 }) => {
   useEffect(() => {
@@ -106,19 +116,93 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
         </div>
       </div>
 
+      {/* Rematch Challenge Prompt (When opponent sends a challenge) */}
+      {rematchStatus === 'received' && (
+        <div className="w-full rounded-2xl bg-surface-container-high/95 backdrop-blur-2xl p-5 border-2 border-primary-container shadow-[0_0_32px_rgba(0,245,212,0.35)] flex flex-col items-center text-center gap-3 animate-fadeIn">
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-primary-container/20 border border-primary-container/40">
+            <span className="w-2.5 h-2.5 rounded-full bg-primary-container animate-ping" />
+            <span className="font-label-sm text-xs font-black text-primary-fixed uppercase tracking-wider">
+              Rematch Challenge
+            </span>
+          </div>
+
+          <div className="flex flex-col items-center gap-1">
+            <h3 className="font-headline-sm text-lg font-black text-on-surface">
+              {rematchRequesterName || opponentName} asks for a Rematch!
+            </h3>
+            <p className="font-body-sm text-xs text-on-surface-variant">
+              Will you accept the duel on a fresh synchronized board?
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5 w-full mt-1">
+            <button
+              type="button"
+              onClick={() => {
+                sounds.playVictory();
+                onAcceptRematch?.();
+              }}
+              className="h-12 rounded-xl bg-gradient-to-r from-primary-fixed to-primary-container text-on-primary-fixed font-headline-sm text-sm font-black shadow-[0_0_20px_rgba(0,245,212,0.5)] hover:brightness-105 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[20px]">check_circle</span>
+              <span>Accept</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                sounds.playTap();
+                onDeclineRematch?.();
+              }}
+              className="h-12 rounded-xl bg-surface-container-highest hover:bg-surface-bright text-error font-bold text-sm border border-error/30 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[18px]">cancel</span>
+              <span>Decline</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Rematch Declined Banner */}
+      {rematchStatus === 'declined' && (
+        <div className="w-full rounded-xl bg-error-container/40 border border-error/40 p-3 flex items-center justify-center gap-2 text-error text-xs font-bold animate-fadeIn">
+          <span className="material-symbols-outlined text-[18px]">info</span>
+          <span>{rematchRequesterName || opponentName} declined the rematch.</span>
+        </div>
+      )}
+
       {/* Primary Actions */}
       <div className="flex flex-col w-full gap-2.5">
-        <button
-          type="button"
-          onClick={() => {
-            sounds.playTap();
-            onRematch();
-          }}
-          className="w-full h-14 rounded-2xl bg-gradient-to-r from-primary-fixed to-primary-container text-on-primary-fixed font-headline-sm text-base font-black shadow-[0_0_24px_rgba(0,245,212,0.45)] hover:brightness-105 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
-        >
-          <span className="material-symbols-outlined text-[22px]">replay</span>
-          <span>Play Rematch</span>
-        </button>
+        {rematchStatus === 'requesting' ? (
+          <div className="w-full flex flex-col gap-2">
+            <div className="w-full h-14 rounded-2xl bg-surface-container-high/90 border border-primary-container/40 text-primary-fixed font-headline-sm text-sm font-bold flex items-center justify-center gap-2.5 shadow-md">
+              <span className="w-4 h-4 border-2 border-primary-container border-t-transparent rounded-full animate-spin" />
+              <span>Waiting for {opponentName} to accept...</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                sounds.playTap();
+                onCancelRematchRequest?.();
+              }}
+              className="text-xs text-on-surface-variant/70 hover:text-on-surface transition-colors text-center py-1 cursor-pointer"
+            >
+              Cancel Request
+            </button>
+          </div>
+        ) : rematchStatus === 'received' ? null : (
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playTap();
+              onRematch();
+            }}
+            className="w-full h-14 rounded-2xl bg-gradient-to-r from-primary-fixed to-primary-container text-on-primary-fixed font-headline-sm text-base font-black shadow-[0_0_24px_rgba(0,245,212,0.45)] hover:brightness-105 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[22px]">replay</span>
+            <span>Play Rematch</span>
+          </button>
+        )}
 
         <button
           type="button"
@@ -126,7 +210,7 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
             sounds.playTap();
             onBackToHome();
           }}
-          className="w-full h-12 rounded-2xl bg-surface-container-high hover:bg-surface-bright text-on-surface font-bold text-sm active:scale-[0.98] transition-all flex items-center justify-center gap-2 border border-outline-variant/25"
+          className="w-full h-12 rounded-2xl bg-surface-container-high hover:bg-surface-bright text-on-surface font-bold text-sm active:scale-[0.98] transition-all flex items-center justify-center gap-2 border border-outline-variant/25 cursor-pointer"
         >
           <span className="material-symbols-outlined text-[18px]">home</span>
           <span>Back to Arena</span>

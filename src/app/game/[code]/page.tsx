@@ -36,6 +36,11 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
     callNumber,
     claimTimeoutWin,
     requestRematch,
+    acceptRematch,
+    declineRematch,
+    cancelRematchRequest,
+    rematchStatus,
+    rematchRequesterName,
     resetGame,
   } = useBingoGame();
 
@@ -138,7 +143,12 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
             myLines={myLines}
             opponentLines={opponentLines}
             totalCalls={calledNumbers.length}
+            rematchStatus={rematchStatus}
+            rematchRequesterName={rematchRequesterName}
             onRematch={handleRematch}
+            onAcceptRematch={acceptRematch}
+            onDeclineRematch={declineRematch}
+            onCancelRematchRequest={cancelRematchRequest}
             onBackToHome={handleExitToArena}
           />
         )}

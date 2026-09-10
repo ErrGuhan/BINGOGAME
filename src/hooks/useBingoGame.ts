@@ -18,6 +18,8 @@ export function useBingoGame(initialRoomCode?: string) {
   const [optimisticCalled, setOptimisticCalled] = useState<number | null>(null);
   const [isOpponentDisconnected, setIsOpponentDisconnected] = useState<boolean>(false);
   const [reconnectCountdown, setReconnectCountdown] = useState<number>(60);
+  const [rematchStatus, setRematchStatus] = useState<'idle' | 'requesting' | 'received' | 'accepted' | 'declined'>('idle');
+  const [rematchRequesterName, setRematchRequesterName] = useState<string | null>(null);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const sessionIdRef = useRef<string>('');
@@ -43,6 +45,11 @@ export function useBingoGame(initialRoomCode?: string) {
   useEffect(() => {
     gameRef.current = game;
   }, [game]);
+
+  const playerRef = useRef<Player | null>(null);
+  useEffect(() => {
+    playerRef.current = player;
+  }, [player]);
 
   const isHost = player?.player_number === 1;
   const opponent = isHost ? p2 : p1;
@@ -184,8 +191,16 @@ export function useBingoGame(initialRoomCode?: string) {
         current_turn_player_id: null,
       } : null);
       sounds.playVictory();
-    } else if (event === 'REMATCH_STARTED') {
+    } else if (event === 'REMATCH_REQUESTED') {
+      const d = data as { requesterId: string; requesterName?: string };
+      if (d.requesterId !== playerRef.current?.id) {
+        setRematchStatus('received');
+        setRematchRequesterName(d.requesterName || 'Opponent');
+        sounds.playDraft(580);
+      }
+    } else if (event === 'REMATCH_ACCEPTED' || event === 'REMATCH_STARTED') {
       sounds.playDraft(520);
+      setRematchStatus('accepted');
       setCalledNumbers([]);
       setOptimisticCalled(null);
       setPlayer(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
@@ -200,6 +215,17 @@ export function useBingoGame(initialRoomCode?: string) {
       if (gameRef.current?.id) {
         syncGameState(gameRef.current.id);
       }
+    } else if (event === 'REMATCH_DECLINED') {
+      const d = data as { declinerName?: string };
+      setRematchStatus('declined');
+      setRematchRequesterName(d.declinerName || 'Opponent');
+      sounds.playAlert();
+      setTimeout(() => {
+        setRematchStatus(prev => prev === 'declined' ? 'idle' : prev);
+      }, 4000);
+    } else if (event === 'REMATCH_CANCELLED') {
+      setRematchStatus(prev => prev === 'received' ? 'idle' : prev);
+      setRematchRequesterName(null);
     } else if (event === 'HEARTBEAT') {
       lastHeartbeatRef.current = Date.now();
       opponentLastSeenRef.current = Date.now();
@@ -239,6 +265,10 @@ export function useBingoGame(initialRoomCode?: string) {
         .on('broadcast', { event: 'NUMBER_CALLED' }, ({ payload }) => handleRealtimeEventRef.current('NUMBER_CALLED', payload))
         .on('broadcast', { event: 'PLAYER_JOINED' }, ({ payload }) => handleRealtimeEventRef.current('PLAYER_JOINED', payload))
         .on('broadcast', { event: 'PLAYER_READY' }, ({ payload }) => handleRealtimeEventRef.current('PLAYER_READY', payload))
+        .on('broadcast', { event: 'REMATCH_REQUESTED' }, ({ payload }) => handleRealtimeEventRef.current('REMATCH_REQUESTED', payload))
+        .on('broadcast', { event: 'REMATCH_ACCEPTED' }, ({ payload }) => handleRealtimeEventRef.current('REMATCH_ACCEPTED', payload))
+        .on('broadcast', { event: 'REMATCH_DECLINED' }, ({ payload }) => handleRealtimeEventRef.current('REMATCH_DECLINED', payload))
+        .on('broadcast', { event: 'REMATCH_CANCELLED' }, ({ payload }) => handleRealtimeEventRef.current('REMATCH_CANCELLED', payload))
         .on('broadcast', { event: 'REMATCH_STARTED' }, ({ payload }) => handleRealtimeEventRef.current('REMATCH_STARTED', payload))
         .on('broadcast', { event: 'TIMEOUT_WIN_CLAIMED' }, ({ payload }) => handleRealtimeEventRef.current('TIMEOUT_WIN_CLAIMED', payload))
         .on('broadcast', { event: 'HEARTBEAT' }, ({ payload }) => handleRealtimeEventRef.current('HEARTBEAT', payload))
@@ -676,14 +706,15 @@ export function useBingoGame(initialRoomCode?: string) {
     }
   }, [game?.id, getSession, handleRealtimeEvent]);
 
-  // ACTION: Request Rematch (Resets match state on server and notifies room via Realtime)
-  const requestRematch = useCallback(async () => {
+  // ACTION: Accept Rematch (Resets match state on server and notifies room via Realtime)
+  const acceptRematch = useCallback(async () => {
     if (!game?.id) return;
     setLoading(true);
     setError(null);
     const sessionId = getSession();
 
     // 1. Locally reset match state immediately while preserving room code and player session
+    setRematchStatus('accepted');
     setCalledNumbers([]);
     setOptimisticCalled(null);
     setPlayer(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
@@ -696,17 +727,17 @@ export function useBingoGame(initialRoomCode?: string) {
       current_turn_player_id: null,
     } : null);
 
-    // 2. Broadcast to opponent via Realtime channel
+    // 2. Broadcast acceptance to opponent via Realtime channel
     if (channelRef.current) {
       channelRef.current.send({
         type: 'broadcast',
-        event: 'REMATCH_STARTED',
+        event: 'REMATCH_ACCEPTED',
         payload: {
           gameId: game.id,
           roomCode: game.room_code,
-          initiatedBy: player?.id,
+          acceptedBy: player?.id,
         },
-      }).catch(err => console.warn('Realtime rematch broadcast warning:', err));
+      }).catch(err => console.warn('Realtime rematch accept broadcast warning:', err));
     }
 
     // 3. Call server-side rematch RPC
@@ -727,6 +758,67 @@ export function useBingoGame(initialRoomCode?: string) {
       setLoading(false);
     }
   }, [game?.id, game?.room_code, getSession, player?.id]);
+
+  // ACTION: Request Rematch (Sends challenge notification to opponent)
+  const requestRematch = useCallback(async () => {
+    if (!game?.id) return;
+    // If we already received a request from opponent, clicking rematch accepts it!
+    if (rematchStatus === 'received') {
+      return acceptRematch();
+    }
+    setRematchStatus('requesting');
+    setLoading(true);
+    try {
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'REMATCH_REQUESTED',
+          payload: {
+            gameId: game.id,
+            roomCode: game.room_code,
+            requesterId: player?.id,
+            requesterName: player?.display_name || 'Opponent',
+          },
+        }).catch(err => console.warn('Realtime rematch request broadcast warning:', err));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [acceptRematch, game?.id, game?.room_code, player?.display_name, player?.id, rematchStatus]);
+
+  // ACTION: Decline Rematch (Declines challenge and notifies opponent)
+  const declineRematch = useCallback(() => {
+    setRematchStatus('idle');
+    setRematchRequesterName(null);
+    sounds.playTap();
+    if (channelRef.current && game?.id) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'REMATCH_DECLINED',
+        payload: {
+          gameId: game.id,
+          declinedBy: player?.id,
+          declinerName: player?.display_name || 'Opponent',
+        },
+      }).catch(err => console.warn('Realtime rematch decline broadcast warning:', err));
+    }
+  }, [game?.id, player?.display_name, player?.id]);
+
+  // ACTION: Cancel Rematch Request
+  const cancelRematchRequest = useCallback(() => {
+    setRematchStatus('idle');
+    sounds.playTap();
+    if (channelRef.current && game?.id) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'REMATCH_CANCELLED',
+        payload: {
+          gameId: game.id,
+          cancelledBy: player?.id,
+        },
+      }).catch(err => console.warn('Realtime rematch cancel broadcast warning:', err));
+    }
+  }, [game?.id, player?.id]);
 
   // Auto-connect if initialRoomCode provided
   useEffect(() => {
@@ -760,6 +852,11 @@ export function useBingoGame(initialRoomCode?: string) {
     callNumber,
     claimTimeoutWin,
     requestRematch,
+    acceptRematch,
+    declineRematch,
+    cancelRematchRequest,
+    rematchStatus,
+    rematchRequesterName,
     refreshState: () => game?.id && syncGameState(game.id),
     resetGame: () => {
       clearActiveRoomCode();
@@ -770,6 +867,8 @@ export function useBingoGame(initialRoomCode?: string) {
       setCalledNumbers([]);
       setError(null);
       setIsOpponentDisconnected(false);
+      setRematchStatus('idle');
+      setRematchRequesterName(null);
     },
   };
 }
