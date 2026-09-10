@@ -1,11 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { CalledNumber } from '@/types/bingo';
+import { CalledNumber, BoardSize } from '@/types/bingo';
 import { calculateLines } from '@/lib/gameEngine';
 import { sounds } from './AudioController';
-
-const ALL_NUMBERS = Array.from({ length: 25 }, (_, i) => i + 1);
 
 interface BingoGridCellProps {
   num: number;
@@ -13,6 +11,7 @@ interface BingoGridCellProps {
   isWinningCell: boolean;
   isSelected: boolean;
   isMyTurn: boolean;
+  boardSize: BoardSize;
   onSelect: (num: number) => void;
 }
 
@@ -22,8 +21,11 @@ const BingoGridCell = React.memo(function BingoGridCell({
   isWinningCell,
   isSelected,
   isMyTurn,
+  boardSize,
   onSelect,
 }: BingoGridCellProps) {
+  const is10 = boardSize === 10;
+
   return (
     <button
       type="button"
@@ -34,7 +36,9 @@ const BingoGridCell = React.memo(function BingoGridCell({
         }
       }}
       style={{ willChange: 'transform', transform: 'translateZ(0)' }}
-      className={`aspect-square rounded-xl flex flex-col items-center justify-center relative transition-all ${
+      className={`aspect-square flex flex-col items-center justify-center relative transition-all ${
+        is10 ? 'rounded-md p-0' : 'rounded-xl'
+      } ${
         isWinningCell
           ? 'bg-gradient-to-br from-primary-fixed to-primary-container text-on-primary-fixed shadow-[0_0_18px_rgba(0,245,212,0.8)] border-2 border-white scale-[1.02] z-10'
           : isMarked
@@ -45,14 +49,20 @@ const BingoGridCell = React.memo(function BingoGridCell({
       }`}
     >
       <span
-        className={`font-label-tile-mobile text-label-tile-mobile font-bold ${
-          isMarked ? 'line-through opacity-90 font-extrabold' : ''
-        }`}
+        className={`font-bold ${
+          is10
+            ? 'text-[10px] sm:text-xs leading-none font-black'
+            : 'font-label-tile-mobile text-label-tile-mobile'
+        } ${isMarked ? 'line-through opacity-90 font-extrabold' : ''}`}
       >
         {num}
       </span>
       {isMarked && (
-        <span className="material-symbols-outlined text-[13px] absolute bottom-0.5 right-1 text-on-primary-fixed font-black">
+        <span
+          className={`material-symbols-outlined absolute font-black text-on-primary-fixed ${
+            is10 ? 'text-[9px] sm:text-[11px] bottom-0.5 right-0.5' : 'text-[13px] bottom-0.5 right-1'
+          }`}
+        >
           check
         </span>
       )}
@@ -84,7 +94,7 @@ const CallerPadTile = React.memo(function CallerPadTile({
         onSelect(num);
       }}
       style={{ willChange: 'transform', transform: 'translateZ(0)' }}
-      className={`h-8 rounded-lg font-label-md text-xs flex items-center justify-center transition-all ${
+      className={`h-7 sm:h-8 rounded-lg font-label-md text-xs flex items-center justify-center transition-all ${
         isCalled
           ? 'bg-surface-container-lowest/40 text-on-surface-variant/30 line-through cursor-not-allowed'
           : isSelected
@@ -109,7 +119,19 @@ interface MainGameScreenProps {
   onCallNumber: (num: number) => Promise<void>;
   loading: boolean;
   optimisticCalled?: number | null;
+  boardSize?: BoardSize;
+  targetLines?: number;
 }
+
+const HEADERS_5 = ['B', 'I', 'N', 'G', 'O'];
+const HEADERS_10 = ['B', 'I', 'N', 'G', 'O', 'D', 'U', 'E', 'L', '!'];
+
+const TRAY_RANGES = [
+  { label: '1–25', start: 1, end: 25 },
+  { label: '26–50', start: 26, end: 50 },
+  { label: '51–75', start: 51, end: 75 },
+  { label: '76–100', start: 76, end: 100 },
+];
 
 export const MainGameScreen: React.FC<MainGameScreenProps> = ({
   board,
@@ -121,10 +143,19 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
   onCallNumber,
   loading,
   optimisticCalled,
+  boardSize = 5,
+  targetLines = 5,
 }) => {
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
   const [isCalling, setIsCalling] = useState<boolean>(false);
   const [showNumberPad, setShowNumberPad] = useState<boolean>(false);
+  const [callerTrayRangeIndex, setCallerTrayRangeIndex] = useState<number>(0);
+
+  const totalNumbers = boardSize * boardSize;
+  const allNumbers = useMemo(
+    () => Array.from({ length: totalNumbers }, (_, i) => i + 1),
+    [totalNumbers]
+  );
 
   const handleSelectNumber = useCallback((num: number) => {
     setSelectedNumber(num);
@@ -139,18 +170,18 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
 
   // Calculate completed lines on player's board
   const { completedLines } = useMemo(() => {
-    return calculateLines(board, Array.from(calledNumbersSet));
-  }, [board, calledNumbersSet]);
+    return calculateLines(board, Array.from(calledNumbersSet), boardSize);
+  }, [board, calledNumbersSet, boardSize]);
 
-  // Pre-select first available number when it becomes player's turn
+  // Pre-select first available number on board when it becomes player's turn
   useEffect(() => {
     if (isMyTurn && (selectedNumber === null || calledNumbersSet.has(selectedNumber))) {
       const firstAvailable =
         board.find(n => !calledNumbersSet.has(n)) ||
-        ALL_NUMBERS.find(n => !calledNumbersSet.has(n));
+        allNumbers.find(n => !calledNumbersSet.has(n));
       if (firstAvailable) setSelectedNumber(firstAvailable);
     }
-  }, [isMyTurn, calledNumbersSet, board, selectedNumber]);
+  }, [isMyTurn, calledNumbersSet, board, selectedNumber, allNumbers]);
 
   // Handle number call submission
   const handleExecuteCall = async () => {
@@ -167,10 +198,18 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
 
   const latestCall = calledNumbers.length > 0 ? calledNumbers[calledNumbers.length - 1] : null;
   const historyCalls = calledNumbers.slice(0, -1).reverse();
+  const headers = boardSize === 10 ? HEADERS_10 : HEADERS_5;
+
+  // Numbers to display in the collapsible caller pad
+  const activePadNumbers = useMemo(() => {
+    if (boardSize === 5) return allNumbers;
+    const r = TRAY_RANGES[callerTrayRangeIndex];
+    return Array.from({ length: r.end - r.start + 1 }, (_, i) => r.start + i);
+  }, [boardSize, allNumbers, callerTrayRangeIndex]);
 
   return (
     <div className="flex flex-col w-full max-w-md mx-auto space-y-2 select-none pb-6 pt-1">
-      {/* 1. Redesigned Unified Scoreboard & Turn HUD (No clutter, No "need to win" bar) */}
+      {/* 1. Unified Scoreboard & Turn HUD */}
       <section className="w-full">
         <div className="w-full bg-surface-container/85 backdrop-blur-xl rounded-2xl p-2.5 shadow-xl border border-outline-variant/30 flex items-center justify-between">
           {/* Player (You) */}
@@ -196,7 +235,7 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
                 {playerName}
               </span>
               <span className="font-label-sm text-[11px] text-primary-fixed font-extrabold leading-none mt-0.5">
-                {myLines} / 5 Lines
+                {myLines} / {targetLines} {boardSize === 10 ? 'Strikes' : 'Lines'}
               </span>
             </div>
           </div>
@@ -289,9 +328,9 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
         </div>
       </section>
 
-      {/* 3. Hero 5x5 Bingo Matrix (Direct Tap to Select) */}
+      {/* 3. Hero Bingo Matrix (Direct Tap to Select) */}
       <section className="w-full relative">
-        <div className="w-full aspect-square bg-surface-container/90 backdrop-blur-2xl rounded-2xl p-2.5 shadow-2xl border border-outline-variant/30 relative overflow-hidden flex flex-col justify-between">
+        <div className="w-full aspect-square bg-surface-container/90 backdrop-blur-2xl rounded-2xl p-2 sm:p-2.5 shadow-2xl border border-outline-variant/30 relative overflow-hidden flex flex-col justify-between">
           {/* Winning Line Overlay Banner */}
           {completedLines.length > 0 && (
             <div className="absolute inset-0 pointer-events-none z-20 flex items-center justify-center">
@@ -300,14 +339,38 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
                   stars
                 </span>
                 <span className="font-label-sm text-xs text-primary-fixed uppercase tracking-wider font-black">
-                  {completedLines.length} {completedLines.length === 1 ? 'LINE' : 'LINES'} COMPLETE!
+                  {completedLines.length}{' '}
+                  {completedLines.length === 1
+                    ? boardSize === 10 ? 'STRIKE' : 'LINE'
+                    : boardSize === 10 ? 'STRIKES' : 'LINES'}{' '}
+                  COMPLETE!
                 </span>
               </div>
             </div>
           )}
 
-          {/* 5x5 Grid Board (Memoized Cells) */}
-          <div className="grid grid-cols-5 gap-1.5 w-full h-full relative z-10" id="bingo-board">
+          {/* Column Headers (B-I-N-G-O or B-I-N-G-O-D-U-E-L-!) */}
+          <div
+            className={`grid gap-1 text-center font-headline-sm font-black pb-1 relative z-10 ${
+              boardSize === 10
+                ? 'grid-cols-10 text-[10px] sm:text-xs text-primary-fixed'
+                : 'grid-cols-5 text-xs text-secondary-fixed'
+            }`}
+          >
+            {headers.map((letter, idx) => (
+              <div key={idx} className="tracking-wider drop-shadow-sm">
+                {letter}
+              </div>
+            ))}
+          </div>
+
+          {/* Grid Board (Memoized Cells) */}
+          <div
+            className={`grid w-full h-full relative z-10 ${
+              boardSize === 10 ? 'grid-cols-10 gap-1' : 'grid-cols-5 gap-1.5'
+            }`}
+            id="bingo-board"
+          >
             {board.map((num, idx) => (
               <BingoGridCell
                 key={idx}
@@ -316,6 +379,7 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
                 isWinningCell={completedLines.some(line => line.includes(idx))}
                 isSelected={selectedNumber === num}
                 isMyTurn={isMyTurn}
+                boardSize={boardSize}
                 onSelect={handleSelectNumber}
               />
             ))}
@@ -367,23 +431,49 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
             <span className="material-symbols-outlined text-[14px]">
               {showNumberPad ? 'expand_less' : 'dialpad'}
             </span>
-            <span>{showNumberPad ? 'Hide Tray' : 'Show 1-25 Tray'}</span>
+            <span>{showNumberPad ? 'Hide Tray' : `Show 1-${totalNumbers} Tray`}</span>
           </button>
         </div>
 
-        {/* Optional Collapsible Number Pad (1-25) */}
+        {/* Optional Collapsible Number Pad */}
         {showNumberPad && (
-          <div className="grid grid-cols-7 gap-1.5 p-1.5 bg-surface-container-lowest/80 rounded-xl border border-outline-variant/20 transition-all duration-200 animate-fadeIn">
-            {ALL_NUMBERS.map(num => (
-              <CallerPadTile
-                key={num}
-                num={num}
-                isCalled={calledNumbersSet.has(num)}
-                isSelected={selectedNumber === num}
-                isMyTurn={isMyTurn}
-                onSelect={handleSelectNumber}
-              />
-            ))}
+          <div className="flex flex-col gap-1.5 p-2 bg-surface-container-lowest/80 rounded-xl border border-outline-variant/20 transition-all duration-200 animate-fadeIn">
+            {/* 10x10 Range Filter Tabs */}
+            {boardSize === 10 && (
+              <div className="grid grid-cols-4 gap-1 p-0.5 rounded-lg bg-surface-container-high/60 border border-outline-variant/15">
+                {TRAY_RANGES.map((r, i) => (
+                  <button
+                    key={r.label}
+                    type="button"
+                    onClick={() => {
+                      sounds.playTap();
+                      setCallerTrayRangeIndex(i);
+                    }}
+                    className={`py-1 rounded-md text-[10px] font-black transition-all ${
+                      callerTrayRangeIndex === i
+                        ? 'bg-surface-bright text-primary-fixed shadow-sm border border-primary-container/30'
+                        : 'text-on-surface-variant hover:text-on-surface'
+                    }`}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Numbers Grid */}
+            <div className="grid grid-cols-7 sm:grid-cols-9 gap-1.5 max-h-36 overflow-y-auto p-0.5 scrollbar-thin">
+              {activePadNumbers.map(num => (
+                <CallerPadTile
+                  key={num}
+                  num={num}
+                  isCalled={calledNumbersSet.has(num)}
+                  isSelected={selectedNumber === num}
+                  isMyTurn={isMyTurn}
+                  onSelect={handleSelectNumber}
+                />
+              ))}
+            </div>
           </div>
         )}
       </section>

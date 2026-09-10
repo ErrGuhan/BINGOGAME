@@ -3,10 +3,14 @@
 import React, { useState } from 'react';
 import { sounds } from './AudioController';
 
+import { BoardSize } from '@/types/bingo';
+
 interface CreateGameScreenProps {
   roomCode: string;
   opponentConnected: boolean;
   opponentName?: string;
+  boardSize: BoardSize;
+  onSwitchMode: (size: BoardSize) => void;
   onProceedToSetup: (autoFill: boolean) => void;
   onBack: () => void;
 }
@@ -15,6 +19,8 @@ export const CreateGameScreen: React.FC<CreateGameScreenProps> = ({
   roomCode,
   opponentConnected,
   opponentName = 'Challenger',
+  boardSize,
+  onSwitchMode,
   onProceedToSetup,
   onBack,
 }) => {
@@ -124,6 +130,61 @@ export const CreateGameScreen: React.FC<CreateGameScreenProps> = ({
               ? 'Rival is in the lobby! Ready up your board to start.'
               : 'Share the 4-letter code with your opponent.'}
           </span>
+        </div>
+      </div>
+
+      {/* Game Mode Selector */}
+      <div className="w-full rounded-2xl bg-surface-container/70 backdrop-blur-xl p-3.5 border border-outline-variant/30 flex flex-col gap-2.5 shadow-md">
+        <div className="flex items-center justify-between px-1">
+          <span className="font-label-sm text-xs text-on-surface font-bold">
+            Game Variant:
+          </span>
+          <span className="font-label-sm text-[10px] text-primary-fixed uppercase tracking-wider font-extrabold bg-primary-container/20 px-2 py-0.5 rounded-full border border-primary-container/30">
+            {boardSize === 10 ? '10 Strikes to Win' : '5 Lines to Win'}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playTap();
+              onSwitchMode(5);
+            }}
+            className={`p-2.5 rounded-xl border flex flex-col items-center gap-1 transition-all ${
+              boardSize === 5
+                ? 'bg-primary-container/25 border-primary-container text-primary-fixed shadow-[0_0_16px_rgba(0,245,212,0.35)]'
+                : 'bg-surface-container-high/60 border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high'
+            }`}
+          >
+            <div className="flex items-center gap-1.5 font-headline-sm text-xs font-black">
+              <span className="material-symbols-outlined text-[16px]">grid_4x4</span>
+              <span>Classic 5x5</span>
+            </div>
+            <span className="text-[10px] text-on-surface-variant leading-none">
+              25 Numbers · 5 Lines
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playTap();
+              onSwitchMode(10);
+            }}
+            className={`p-2.5 rounded-xl border flex flex-col items-center gap-1 transition-all ${
+              boardSize === 10
+                ? 'bg-secondary-container/25 border-secondary text-secondary-fixed shadow-[0_0_16px_rgba(168,85,247,0.35)]'
+                : 'bg-surface-container-high/60 border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high'
+            }`}
+          >
+            <div className="flex items-center gap-1.5 font-headline-sm text-xs font-black">
+              <span className="material-symbols-outlined text-[16px]">grid_on</span>
+              <span>Mega 10x10</span>
+            </div>
+            <span className="text-[10px] text-on-surface-variant leading-none">
+              100 Numbers · 10 Strikes
+            </span>
+          </button>
         </div>
       </div>
 

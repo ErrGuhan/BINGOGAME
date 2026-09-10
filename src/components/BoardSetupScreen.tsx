@@ -1,11 +1,16 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { sounds } from './AudioController';
 import { generateRandomBoard } from '@/lib/gameEngine';
+import { BoardSize } from '@/types/bingo';
 
 interface BoardSetupScreenProps {
+  boardSize?: BoardSize;
+  targetLines?: number;
   initialAutoFill?: boolean;
+  isHost?: boolean;
+  onSwitchMode?: (size: BoardSize) => void;
   onConfirmBoard: (board: number[]) => void;
   onBack: () => void;
   loading: boolean;
@@ -13,27 +18,47 @@ interface BoardSetupScreenProps {
   opponentName?: string;
 }
 
+const HEADERS_5 = ['B', 'I', 'N', 'G', 'O'];
+const HEADERS_10 = ['B', 'I', 'N', 'G', 'O', 'D', 'U', 'E', 'L', '!'];
+
+const TRAY_RANGES = [
+  { label: '1–25', start: 1, end: 25 },
+  { label: '26–50', start: 26, end: 50 },
+  { label: '51–75', start: 51, end: 75 },
+  { label: '76–100', start: 76, end: 100 },
+];
+
 export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
+  boardSize = 5,
+  targetLines = 5,
   initialAutoFill = true,
+  isHost = false,
+  onSwitchMode,
   onConfirmBoard,
   onBack,
   loading,
   isReady = false,
   opponentName = 'Opponent',
 }) => {
-  const [board, setBoard] = useState<(number | null)[]>(Array(25).fill(null));
+  const totalCells = boardSize * boardSize;
+  const [board, setBoard] = useState<(number | null)[]>(() => Array(totalCells).fill(null));
   const [activeIndex, setActiveIndex] = useState<number>(0);
+  const [trayRangeIndex, setTrayRangeIndex] = useState<number>(0);
 
+  // Initialize or re-initialize board when boardSize or initialAutoFill changes
   useEffect(() => {
     if (initialAutoFill) {
-      setBoard(generateRandomBoard());
+      setBoard(generateRandomBoard(boardSize));
       setActiveIndex(-1);
+    } else {
+      setBoard(Array(totalCells).fill(null));
+      setActiveIndex(0);
     }
-  }, [initialAutoFill]);
+  }, [boardSize, initialAutoFill, totalCells]);
 
-  const placedCount = board.filter(v => v !== null).length;
-  const isComplete = placedCount === 25;
-  const usedNumbers = new Set(board.filter((v): v is number => v !== null));
+  const placedCount = useMemo(() => board.filter(v => v !== null).length, [board]);
+  const isComplete = placedCount === totalCells;
+  const usedNumbers = useMemo(() => new Set(board.filter((v): v is number => v !== null)), [board]);
 
   const handleCellClick = (idx: number) => {
     if (isReady) return;
@@ -57,7 +82,7 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
     }
     if (target === -1) return;
 
-    sounds.playDraft(440 + num * 18);
+    sounds.playDraft(440 + (num % 25) * 18);
     const nextBoard = [...board];
     nextBoard[target] = num;
     setBoard(nextBoard);
@@ -69,14 +94,35 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
 
   const handleShuffle = () => {
     sounds.playLineComplete();
-    setBoard(generateRandomBoard());
+    setBoard(generateRandomBoard(boardSize));
     setActiveIndex(-1);
   };
 
   const handleClear = () => {
     sounds.playTap();
-    setBoard(Array(25).fill(null));
+    setBoard(Array(totalCells).fill(null));
     setActiveIndex(0);
+  };
+
+  const handleFillRemaining = () => {
+    sounds.playLineComplete();
+    const remainingNums: number[] = [];
+    for (let i = 1; i <= totalCells; i++) {
+      if (!usedNumbers.has(i)) remainingNums.push(i);
+    }
+    // Shuffle remaining numbers
+    for (let i = remainingNums.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [remainingNums[i], remainingNums[j]] = [remainingNums[j], remainingNums[i]];
+    }
+
+    let remIdx = 0;
+    const nextBoard = board.map(val => {
+      if (val !== null) return val;
+      return remainingNums[remIdx++];
+    });
+    setBoard(nextBoard);
+    setActiveIndex(-1);
   };
 
   const handleConfirm = () => {
@@ -84,6 +130,17 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
     sounds.playVictory();
     onConfirmBoard(board as number[]);
   };
+
+  const headers = boardSize === 10 ? HEADERS_10 : HEADERS_5;
+
+  // Numbers to display in the tray
+  const trayNumbers = useMemo(() => {
+    if (boardSize === 5) {
+      return Array.from({ length: 25 }, (_, i) => i + 1);
+    }
+    const currentRange = TRAY_RANGES[trayRangeIndex];
+    return Array.from({ length: currentRange.end - currentRange.start + 1 }, (_, i) => currentRange.start + i);
+  }, [boardSize, trayRangeIndex]);
 
   return (
     <div className="flex flex-col w-full max-w-md mx-auto gap-3 select-none pt-1 pb-6">
@@ -101,24 +158,86 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
           <span>Back</span>
         </button>
 
-        <span className="font-label-sm text-xs font-black text-primary-fixed bg-primary-container/20 px-3 py-1 rounded-full border border-primary-container/30">
-          {isComplete ? 'Board Complete (25/25)' : `Placed: ${placedCount}/25`}
-        </span>
+        {/* Mode Tag & Status */}
+        <div className="flex items-center gap-1.5">
+          <span className="font-label-sm text-[11px] font-black uppercase tracking-wider bg-secondary-container/25 text-secondary-fixed px-2.5 py-1 rounded-full border border-secondary/30">
+            {boardSize === 10 ? 'Mega 10x10' : 'Classic 5x5'}
+          </span>
+          <span className="font-label-sm text-xs font-black text-primary-fixed bg-primary-container/20 px-3 py-1 rounded-full border border-primary-container/30">
+            {isComplete ? `Complete (${totalCells}/${totalCells})` : `${placedCount}/${totalCells}`}
+          </span>
+        </div>
       </div>
 
-      {/* 5x5 Bingo Board */}
-      <div className="w-full aspect-square bg-surface-container/90 backdrop-blur-2xl rounded-2xl p-3 shadow-2xl border border-outline-variant/30 flex flex-col justify-between">
-        {/* Column Headers B-I-N-G-O */}
-        <div className="grid grid-cols-5 gap-1.5 text-center font-headline-sm text-xs text-secondary-fixed font-black pb-1">
-          <div>B</div>
-          <div>I</div>
-          <div>N</div>
-          <div>G</div>
-          <div>O</div>
+      {/* Host Mode Switcher Banner (Shown before locking board) */}
+      {isHost && onSwitchMode && !isReady && (
+        <div className="w-full bg-surface-container/70 backdrop-blur-md rounded-xl p-2 border border-outline-variant/30 flex items-center justify-between gap-2 shadow-sm">
+          <span className="font-label-sm text-[11px] text-on-surface-variant font-bold pl-1">
+            Duel Mode:
+          </span>
+          <div className="flex items-center p-0.5 rounded-lg bg-surface-container-lowest/80 border border-outline-variant/20">
+            <button
+              type="button"
+              onClick={() => {
+                if (boardSize !== 5) {
+                  sounds.playTap();
+                  onSwitchMode(5);
+                }
+              }}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
+                boardSize === 5
+                  ? 'bg-surface-container-high text-primary-container shadow-sm border border-primary-container/30'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+            >
+              5x5 (5 Lines)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (boardSize !== 10) {
+                  sounds.playTap();
+                  onSwitchMode(10);
+                }
+              }}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
+                boardSize === 10
+                  ? 'bg-surface-container-high text-secondary shadow-sm border border-secondary/30'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+            >
+              10x10 (10 Strikes)
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Bingo Board Container */}
+      <div className="w-full aspect-square bg-surface-container/90 backdrop-blur-2xl rounded-2xl p-2.5 sm:p-3 shadow-2xl border border-outline-variant/30 flex flex-col justify-between">
+        {/* Column Headers (B-I-N-G-O or B-I-N-G-O-D-U-E-L-!) */}
+        <div
+          className={`grid gap-1 text-center font-headline-sm text-xs font-black pb-1 ${
+            boardSize === 10
+              ? 'grid-cols-10 text-[10px] sm:text-xs text-primary-fixed'
+              : 'grid-cols-5 text-xs text-secondary-fixed'
+          }`}
+        >
+          {headers.map((letter, idx) => (
+            <div key={idx} className="tracking-wider drop-shadow-sm">
+              {letter}
+            </div>
+          ))}
         </div>
 
-        {/* 25 Board Tiles */}
-        <div className="grid grid-cols-5 grid-rows-5 gap-1.5 w-full h-full" id="bingo-matrix">
+        {/* Board Tiles Grid */}
+        <div
+          className={`grid w-full h-full ${
+            boardSize === 10
+              ? 'grid-cols-10 grid-rows-10 gap-1'
+              : 'grid-cols-5 grid-rows-5 gap-1.5'
+          }`}
+          id="bingo-matrix"
+        >
           {board.map((val, idx) => {
             const isSelected = idx === activeIndex;
             const isFilled = val !== null;
@@ -129,18 +248,34 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
                 type="button"
                 disabled={isReady}
                 onClick={() => handleCellClick(idx)}
-                className={`relative aspect-square rounded-xl flex items-center justify-center transition-all ${
+                className={`relative aspect-square flex items-center justify-center transition-all ${
+                  boardSize === 10 ? 'rounded-md' : 'rounded-xl'
+                } ${
                   isSelected
-                    ? 'bg-surface-bright border-2 border-primary-container shadow-[0_0_16px_rgba(0,245,212,0.45)] text-primary-fixed scale-[1.02] z-10'
+                    ? 'bg-surface-bright border-2 border-primary-container shadow-[0_0_16px_rgba(0,245,212,0.45)] text-primary-fixed scale-[1.03] z-10'
                     : isFilled
-                    ? 'bg-surface-container-high/90 text-on-surface hover:bg-surface-bright font-black text-base shadow-sm border border-outline-variant/20'
+                    ? 'bg-surface-container-high/90 text-on-surface hover:bg-surface-bright font-black shadow-sm border border-outline-variant/20'
                     : 'bg-surface-container-high/40 text-on-surface-variant/30 border border-outline-variant/15 hover:bg-surface-container-high'
                 }`}
               >
                 {isFilled ? (
-                  <span>{val}</span>
+                  <span
+                    className={`font-black ${
+                      boardSize === 10
+                        ? 'text-[11px] sm:text-xs leading-none'
+                        : 'text-base'
+                    }`}
+                  >
+                    {val}
+                  </span>
                 ) : (
-                  <span className="material-symbols-outlined text-[16px] opacity-40">add</span>
+                  <span
+                    className={`material-symbols-outlined opacity-40 ${
+                      boardSize === 10 ? 'text-[12px]' : 'text-[16px]'
+                    }`}
+                  >
+                    add
+                  </span>
                 )}
               </button>
             );
@@ -151,17 +286,53 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
       {/* Number Tray (Shown if board is not complete) */}
       {!isComplete && (
         <div className="w-full bg-surface-container/70 backdrop-blur-md rounded-2xl p-3 border border-outline-variant/30 flex flex-col gap-2 shadow-md">
+          {/* Header with Tray Title and Fill Remaining */}
           <div className="flex items-center justify-between px-1">
             <span className="font-label-sm text-[11px] text-on-surface font-bold">
-              Tap Numbers to Place (1 - 25):
+              Tap Numbers to Place:
             </span>
-            <span className="font-label-sm text-[11px] text-tertiary-fixed font-bold">
-              {25 - placedCount} Remaining
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="font-label-sm text-[11px] text-tertiary-fixed font-bold">
+                {totalCells - placedCount} Remaining
+              </span>
+              {placedCount > 0 && placedCount < totalCells && (
+                <button
+                  type="button"
+                  onClick={handleFillRemaining}
+                  className="text-[10px] font-black uppercase text-primary-fixed bg-primary-container/20 hover:bg-primary-container/35 px-2 py-0.5 rounded-full border border-primary-container/30 transition-all active:scale-95"
+                >
+                  ⚡ Fill Remaining
+                </button>
+              )}
+            </div>
           </div>
 
-          <div className="grid grid-cols-7 gap-1.5 max-h-32 overflow-y-auto p-1">
-            {Array.from({ length: 25 }, (_, i) => i + 1).map(num => {
+          {/* 10x10 Range Tabs */}
+          {boardSize === 10 && (
+            <div className="grid grid-cols-4 gap-1 p-0.5 rounded-xl bg-surface-container-lowest/70 border border-outline-variant/20">
+              {TRAY_RANGES.map((r, i) => (
+                <button
+                  key={r.label}
+                  type="button"
+                  onClick={() => {
+                    sounds.playTap();
+                    setTrayRangeIndex(i);
+                  }}
+                  className={`py-1 rounded-lg text-[10px] font-black transition-all ${
+                    trayRangeIndex === i
+                      ? 'bg-surface-container-high text-primary-fixed shadow-sm border border-primary-container/30'
+                      : 'text-on-surface-variant hover:text-on-surface'
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Chips Grid */}
+          <div className="grid grid-cols-7 sm:grid-cols-9 gap-1.5 max-h-32 overflow-y-auto p-1 scrollbar-thin">
+            {trayNumbers.map(num => {
               const isUsed = usedNumbers.has(num);
               return (
                 <button
@@ -169,7 +340,7 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
                   type="button"
                   disabled={isUsed || isReady}
                   onClick={() => handleTrayChipClick(num)}
-                  className={`h-8 rounded-lg font-bold text-xs transition-all flex items-center justify-center ${
+                  className={`h-7 rounded-lg font-bold text-xs transition-all flex items-center justify-center ${
                     isUsed
                       ? 'bg-surface-container-lowest/40 text-outline line-through opacity-30 cursor-not-allowed'
                       : 'bg-surface-container-high hover:bg-surface-bright text-primary-fixed border border-outline-variant/20 active:scale-95'

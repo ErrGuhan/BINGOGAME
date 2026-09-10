@@ -24,6 +24,8 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
     calledNumbers,
     myLines,
     opponentLines,
+    boardSize,
+    targetLines,
     isMyTurn,
     winner,
     isWinner,
@@ -33,6 +35,7 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
     isOpponentDisconnected,
     reconnectCountdown,
     joinGame,
+    setGameMode,
     setBoard,
     callNumber,
     claimTimeoutWin,
@@ -124,7 +127,11 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
         {/* Board Setup State (waiting/ready before play, or when rematch accepted) */}
         {(rematchStatus === 'accepted' || (game?.status !== 'playing' && game?.status !== 'completed')) && (
           <BoardSetupScreen
-            key={`setup_${game?.id || 'room'}_${game?.status}_${rematchStatus}`}
+            key={`setup_${game?.id || 'room'}_${game?.status}_${rematchStatus}_${boardSize}`}
+            boardSize={boardSize}
+            targetLines={targetLines}
+            isHost={player?.player_number === 1}
+            onSwitchMode={setGameMode}
             initialAutoFill={true}
             onConfirmBoard={handleBoardConfirmed}
             onBack={handleExitToArena}
@@ -142,7 +149,8 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
               calledNumbers={calledNumbers}
               isMyTurn={isMyTurn}
               myLines={myLines}
-              opponentLines={opponentLines}
+              boardSize={boardSize}
+              targetLines={targetLines}
               playerName={player.display_name}
               opponentName={opponentName}
               onCallNumber={callNumber}
@@ -167,6 +175,8 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
             myLines={myLines}
             opponentLines={opponentLines}
             totalCalls={calledNumbers.length}
+            boardSize={boardSize}
+            targetLines={targetLines}
             rematchStatus={rematchStatus}
             rematchRequesterName={rematchRequesterName}
             onRematch={handleRematch}

@@ -114,6 +114,47 @@ describe('Game Engine - Line Calculation Algorithm', () => {
   });
 });
 
+describe('Game Engine - 10x10 Mega Mode', () => {
+  const megaBoard = Array.from({ length: 100 }, (_, i) => i + 1);
+
+  it('generates a valid 10x10 board with numbers 1 to 100 without duplicates', () => {
+    const board = generateRandomBoard(10);
+    expect(board).toHaveLength(100);
+    expect(validateBoard(board, 10)).toBe(true);
+
+    const uniqueSet = new Set(board);
+    expect(uniqueSet.size).toBe(100);
+    for (let i = 1; i <= 100; i++) {
+      expect(uniqueSet.has(i)).toBe(true);
+    }
+  });
+
+  it('detects a completed horizontal row on 10x10 board', () => {
+    // Row 1: 1..10
+    const called = Array.from({ length: 10 }, (_, i) => i + 1);
+    const result = calculateLines(megaBoard, called);
+    expect(result.lines).toBe(1);
+    expect(result.completedLines).toEqual([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]]);
+  });
+
+  it('detects completed diagonals on 10x10 board', () => {
+    // D1 indices: 0, 11, 22, 33, 44, 55, 66, 77, 88, 99
+    // Since board is 1..100, values are index + 1
+    const d1Indices = [0, 11, 22, 33, 44, 55, 66, 77, 88, 99];
+    const called = d1Indices.map(idx => idx + 1);
+    const result = calculateLines(megaBoard, called);
+    expect(result.lines).toBe(1);
+    expect(result.completedLines).toEqual([d1Indices]);
+  });
+
+  it('detects exactly 22 total lines on a completely filled 10x10 board', () => {
+    const allCalled = Array.from({ length: 100 }, (_, i) => i + 1);
+    const result = calculateLines(megaBoard, allCalled);
+    expect(result.lines).toBe(22); // 10 rows + 10 cols + 2 diagonals
+    expect(result.completedLines).toHaveLength(22);
+  });
+});
+
 describe('Game Engine - Session & Room Storage', () => {
   beforeEach(() => {
     clearActiveRoomCode();

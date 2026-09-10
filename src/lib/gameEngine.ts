@@ -1,37 +1,90 @@
-// Precomputed line coordinate index sets for 5x5 grid (0..24)
-export const LINE_INDICES: number[][] = [
-  // 5 Rows
-  [0, 1, 2, 3, 4],
-  [5, 6, 7, 8, 9],
-  [10, 11, 12, 13, 14],
-  [15, 16, 17, 18, 19],
-  [20, 21, 22, 23, 24],
-  // 5 Columns
-  [0, 5, 10, 15, 20],
-  [1, 6, 11, 16, 21],
-  [2, 7, 12, 17, 22],
-  [3, 8, 13, 18, 23],
-  [4, 9, 14, 19, 24],
-  // 2 Diagonals
-  [0, 6, 12, 18, 24],
-  [4, 8, 12, 16, 20],
-];
+/**
+ * Generates winning line coordinate index sets for an N x N grid:
+ * - N horizontal rows
+ * - N vertical columns
+ * - 2 diagonals (top-left to bottom-right, top-right to bottom-left)
+ * Total lines = 2N + 2 (12 for 5x5, 22 for 10x10)
+ */
+export function generateLineIndices(size: number): number[][] {
+  const lines: number[][] = [];
+
+  // N Rows
+  for (let r = 0; r < size; r++) {
+    const row: number[] = [];
+    for (let c = 0; c < size; c++) {
+      row.push(r * size + c);
+    }
+    lines.push(row);
+  }
+
+  // N Columns
+  for (let c = 0; c < size; c++) {
+    const col: number[] = [];
+    for (let r = 0; r < size; r++) {
+      col.push(r * size + c);
+    }
+    lines.push(col);
+  }
+
+  // Diagonal 1 (top-left to bottom-right)
+  const d1: number[] = [];
+  for (let i = 0; i < size; i++) {
+    d1.push(i * size + i);
+  }
+  lines.push(d1);
+
+  // Diagonal 2 (top-right to bottom-left)
+  const d2: number[] = [];
+  for (let i = 0; i < size; i++) {
+    d2.push(i * size + (size - 1 - i));
+  }
+  lines.push(d2);
+
+  return lines;
+}
+
+// Precomputed line index sets
+export const LINE_INDICES_5: number[][] = generateLineIndices(5);
+export const LINE_INDICES_10: number[][] = generateLineIndices(10);
+
+// Backwards-compatible export for 5x5
+export const LINE_INDICES: number[][] = LINE_INDICES_5;
+
+/**
+ * Returns precomputed line indices for a given board dimension
+ */
+export function getLineIndices(size: number = 5): number[][] {
+  if (size === 10) return LINE_INDICES_10;
+  return LINE_INDICES_5;
+}
 
 /**
  * Calculates completed lines and returns winning line index combinations
+ * Automatically detects whether board is 5x5 (25 cells) or 10x10 (100 cells)
  */
-export function calculateLines(board: number[], calledNumbers: number[]): {
+export function calculateLines(
+  board: number[],
+  calledNumbers: number[],
+  explicitSize?: number
+): {
   lines: number;
   completedLines: number[][];
 } {
-  if (!board || board.length !== 25) {
+  if (!board || board.length === 0) {
+    return { lines: 0, completedLines: [] };
+  }
+
+  const size = explicitSize || (board.length === 100 ? 10 : 5);
+  const expectedLength = size * size;
+  if (board.length !== expectedLength) {
     return { lines: 0, completedLines: [] };
   }
 
   const calledSet = new Set(calledNumbers);
   const completedLines: number[][] = [];
+  const lineIndices = getLineIndices(size);
 
-  for (const line of LINE_INDICES) {
+  for (const line of lineIndices) {
     const isComplete = line.every(idx => calledSet.has(board[idx]));
     if (isComplete) {
       completedLines.push(line);
@@ -45,10 +98,12 @@ export function calculateLines(board: number[], calledNumbers: number[]): {
 }
 
 /**
- * Generates a randomly shuffled 5x5 board containing numbers 1..25
+ * Generates a randomly shuffled board containing numbers 1..size^2
+ * Supports 5x5 (1..25) and 10x10 (1..100)
  */
-export function generateRandomBoard(): number[] {
-  const nums = Array.from({ length: 25 }, (_, i) => i + 1);
+export function generateRandomBoard(size: number = 5): number[] {
+  const total = size * size;
+  const nums = Array.from({ length: total }, (_, i) => i + 1);
   // Fisher-Yates shuffle
   for (let i = nums.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -58,16 +113,17 @@ export function generateRandomBoard(): number[] {
 }
 
 /**
- * Validates whether a board has exactly 25 numbers, all 1-25, without duplicates
+ * Validates whether a board has exactly size^2 numbers, all 1..size^2, without duplicates
  */
-export function validateBoard(board: (number | null)[]): boolean {
-  if (!board || board.length !== 25) return false;
+export function validateBoard(board: (number | null)[], size: number = 5): boolean {
+  const expectedCount = size * size;
+  if (!board || board.length !== expectedCount) return false;
   if (board.some(v => v === null || v === undefined)) return false;
-  
-  const set = new Set(board as number[]);
-  if (set.size !== 25) return false;
 
-  for (let i = 1; i <= 25; i++) {
+  const set = new Set(board as number[]);
+  if (set.size !== expectedCount) return false;
+
+  for (let i = 1; i <= expectedCount; i++) {
     if (!set.has(i)) return false;
   }
   return true;

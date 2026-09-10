@@ -29,6 +29,8 @@ export default function App() {
     calledNumbers,
     myLines,
     opponentLines,
+    boardSize,
+    targetLines,
     isMyTurn,
     winner,
     isWinner,
@@ -38,6 +40,7 @@ export default function App() {
     isOpponentDisconnected,
     reconnectCountdown,
     createGame,
+    setGameMode,
     joinGame,
     setBoard,
     callNumber,
@@ -225,6 +228,8 @@ export default function App() {
             roomCode={game?.room_code || '....'}
             opponentConnected={Boolean(p2?.connected)}
             opponentName={p2?.display_name || 'Challenger'}
+            boardSize={boardSize}
+            onSwitchMode={setGameMode}
             onProceedToSetup={handleProceedToSetup}
             onBack={handleBackToHome}
           />
@@ -242,7 +247,11 @@ export default function App() {
 
         {screen === 'setup' && (
           <BoardSetupScreen
-            key={`setup_${game?.id || 'room'}_${game?.status}_${rematchStatus}`}
+            key={`setup_${game?.id || 'room'}_${game?.status}_${rematchStatus}_${boardSize}`}
+            boardSize={boardSize}
+            targetLines={targetLines}
+            isHost={player?.player_number === 1}
+            onSwitchMode={setGameMode}
             initialAutoFill={autoFillBoard}
             onConfirmBoard={handleBoardConfirmed}
             onBack={() => {
@@ -265,6 +274,8 @@ export default function App() {
               calledNumbers={calledNumbers}
               isMyTurn={isMyTurn}
               myLines={myLines}
+              boardSize={boardSize}
+              targetLines={targetLines}
               playerName={player.display_name}
               opponentName={opponentName}
               onCallNumber={callNumber}
@@ -288,6 +299,8 @@ export default function App() {
             myLines={myLines}
             opponentLines={opponentLines}
             totalCalls={calledNumbers.length}
+            boardSize={boardSize}
+            targetLines={targetLines}
             rematchStatus={rematchStatus}
             rematchRequesterName={rematchRequesterName}
             onRematch={handleRematch}

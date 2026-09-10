@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Game, Player, CalledNumber, GameStateSnapshot, CallNumberResult } from '@/types/bingo';
+import { Game, Player, CalledNumber, GameStateSnapshot, CallNumberResult, BoardSize } from '@/types/bingo';
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase';
 import { getSessionId, getPlayerName, setPlayerName, setActiveRoomCode, clearActiveRoomCode } from '@/lib/gameEngine';
 import { sounds } from '@/components/AudioController';
@@ -63,6 +63,9 @@ export function useBingoGame(initialRoomCode?: string) {
 
   const myLines = isHost ? (p1?.lines_completed || 0) : (p2?.lines_completed || 0);
   const opponentLines = isHost ? (p2?.lines_completed || 0) : (p1?.lines_completed || 0);
+
+  const boardSize: BoardSize = (game?.board_size === 10 ? 10 : 5);
+  const targetLines: number = game?.target_lines || (boardSize === 10 ? 10 : 5);
 
   // Sync state from snapshot
   const applySnapshot = useCallback((snapshot: GameStateSnapshot | null) => {
@@ -249,6 +252,24 @@ export function useBingoGame(initialRoomCode?: string) {
     } else if (event === 'REMATCH_CANCELLED') {
       setRematchStatus(prev => prev === 'received' ? 'idle' : prev);
       setRematchRequesterName(null);
+    } else if (event === 'GAME_MODE_CHANGED') {
+      const d = data as { boardSize: BoardSize; targetLines: number };
+      if (d.boardSize) {
+        setGame(prev => prev ? {
+          ...prev,
+          board_size: d.boardSize,
+          target_lines: d.targetLines,
+        } : null);
+        setPlayer(prev => prev ? {
+          ...prev,
+          board: null,
+          is_ready: false,
+          lines_completed: 0,
+        } : null);
+        setP1(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
+        setP2(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
+        sounds.playTap();
+      }
     } else if (event === 'HEARTBEAT') {
       opponentLastSeenRef.current = Date.now();
       setIsOpponentDisconnected(false);
@@ -292,6 +313,7 @@ export function useBingoGame(initialRoomCode?: string) {
         .on('broadcast', { event: 'REMATCH_DECLINED' }, ({ payload }) => handleRealtimeEventRef.current('REMATCH_DECLINED', payload))
         .on('broadcast', { event: 'REMATCH_CANCELLED' }, ({ payload }) => handleRealtimeEventRef.current('REMATCH_CANCELLED', payload))
         .on('broadcast', { event: 'REMATCH_STARTED' }, ({ payload }) => handleRealtimeEventRef.current('REMATCH_STARTED', payload))
+        .on('broadcast', { event: 'GAME_MODE_CHANGED' }, ({ payload }) => handleRealtimeEventRef.current('GAME_MODE_CHANGED', payload))
         .on('broadcast', { event: 'TIMEOUT_WIN_CLAIMED' }, ({ payload }) => handleRealtimeEventRef.current('TIMEOUT_WIN_CLAIMED', payload))
         .on('broadcast', { event: 'HEARTBEAT' }, ({ payload }) => handleRealtimeEventRef.current('HEARTBEAT', payload))
         // Direct Database Postgres Changes: Fires in ~50ms whenever a number is called in Supabase
@@ -442,7 +464,7 @@ export function useBingoGame(initialRoomCode?: string) {
   }, [isOpponentDisconnected, game?.status]);
 
   // ACTION: Create Game (Supabase Server-Side RPC)
-  const createGame = useCallback(async (displayName?: string) => {
+  const createGame = useCallback(async (displayName?: string, initialBoardSize: BoardSize = 5) => {
     setLoading(true);
     setError(null);
     const name = displayName || getPlayerName();
@@ -458,6 +480,7 @@ export function useBingoGame(initialRoomCode?: string) {
       const { data, error } = await supabase.rpc('create_game', {
         p_session_id: sessionId,
         p_display_name: name,
+        p_board_size: initialBoardSize,
       });
 
       if (error) {
@@ -466,6 +489,9 @@ export function useBingoGame(initialRoomCode?: string) {
         }
         throw error;
       }
+
+      const chosenBoardSize = (data.board_size as BoardSize) || initialBoardSize;
+      const targetWinLines = data.target_lines || (chosenBoardSize === 10 ? 10 : 5);
 
       // Synchronously populate host game state
       const initialHost: Player = {
@@ -484,7 +510,8 @@ export function useBingoGame(initialRoomCode?: string) {
         id: data.game_id,
         room_code: data.room_code,
         status: data.status || 'waiting',
-        target_lines: 5,
+        target_lines: targetWinLines,
+        board_size: chosenBoardSize,
         current_turn_player_id: null,
         winner_id: null,
         created_at: new Date().toISOString(),
@@ -508,6 +535,48 @@ export function useBingoGame(initialRoomCode?: string) {
       setLoading(false);
     }
   }, [getSession, syncGameState]);
+
+  // ACTION: Set Game Mode (Host switches 5x5 or 10x10)
+  const setGameMode = useCallback(async (newBoardSize: BoardSize) => {
+    if (!game?.id || player?.player_number !== 1) return;
+    setLoading(true);
+    setError(null);
+
+    const sessionId = getSession();
+    const newTarget = newBoardSize === 10 ? 10 : 5;
+
+    // Optimistically update host state
+    setGame(prev => prev ? {
+      ...prev,
+      board_size: newBoardSize,
+      target_lines: newTarget,
+    } : null);
+    setPlayer(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
+    setP1(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
+    setP2(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
+
+    // Broadcast change to opponent
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'GAME_MODE_CHANGED',
+      payload: { boardSize: newBoardSize, targetLines: newTarget },
+    }).catch(() => {});
+
+    try {
+      const supabase = getSupabase();
+      if (supabase && isSupabaseConfigured()) {
+        await supabase.rpc('set_game_mode', {
+          p_game_id: game.id,
+          p_session_id: sessionId,
+          p_board_size: newBoardSize,
+        });
+      }
+    } catch (err: unknown) {
+      console.warn('Failed to persist game mode change to server:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [game?.id, player?.player_number, getSession]);
 
   // ACTION: Join Game (Supabase Server-Side RPC)
   const joinGame = useCallback(async (roomCode: string, displayName?: string) => {
@@ -877,6 +946,8 @@ export function useBingoGame(initialRoomCode?: string) {
     isMyTurn,
     winner,
     isWinner,
+    boardSize,
+    targetLines,
     isHost,
     loading,
     error,
@@ -884,6 +955,7 @@ export function useBingoGame(initialRoomCode?: string) {
     isOpponentDisconnected,
     reconnectCountdown,
     createGame,
+    setGameMode,
     joinGame,
     setBoard,
     callNumber,

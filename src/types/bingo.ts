@@ -1,4 +1,5 @@
 export type GameStatus = 'waiting' | 'ready' | 'playing' | 'completed' | 'abandoned';
+export type BoardSize = 5 | 10;
 
 export interface Game {
   id: string;
@@ -7,6 +8,7 @@ export interface Game {
   current_turn_player_id: string | null;
   winner_id: string | null;
   target_lines: number;
+  board_size: BoardSize;
   created_at: string;
 }
 

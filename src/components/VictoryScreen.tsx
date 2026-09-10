@@ -4,6 +4,8 @@ import React, { useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { sounds } from './AudioController';
 
+import { BoardSize } from '@/types/bingo';
+
 interface VictoryScreenProps {
   isWinner: boolean;
   winnerName: string;
@@ -12,6 +14,8 @@ interface VictoryScreenProps {
   myLines: number;
   opponentLines: number;
   totalCalls: number;
+  boardSize?: BoardSize;
+  targetLines?: number;
   rematchStatus?: 'idle' | 'requesting' | 'received' | 'accepted' | 'declined';
   rematchRequesterName?: string | null;
   onRematch: () => void;
@@ -29,6 +33,8 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
   myLines,
   opponentLines,
   totalCalls,
+  boardSize = 5,
+  targetLines = 5,
   rematchStatus = 'idle',
   rematchRequesterName,
   onRematch,
@@ -90,8 +96,8 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
           </h2>
           <p className="font-body-md text-sm text-on-surface-variant">
             {isWinner
-              ? `Congratulations! You scored ${myLines} lines for BINGO!`
-              : `${opponentName} reached 5 lines first.`}
+              ? `Congratulations! You scored ${myLines} ${boardSize === 10 ? 'strikes' : 'lines'} for BINGO!`
+              : `${opponentName} reached ${targetLines} ${boardSize === 10 ? 'strikes' : 'lines'} first.`}
           </p>
         </div>
 
@@ -99,10 +105,10 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
         <div className="w-full grid grid-cols-2 gap-2 mt-2">
           <div className="bg-surface-container-high/80 rounded-xl p-3 border border-outline-variant/20 flex flex-col items-center">
             <span className="font-label-sm text-[10px] text-on-surface-variant uppercase font-bold">
-              Your Lines
+              Your {boardSize === 10 ? 'Strikes' : 'Lines'}
             </span>
             <span className="font-headline-sm text-lg text-primary-fixed font-black">
-              {myLines} / 5
+              {myLines} / {targetLines}
             </span>
           </div>
           <div className="bg-surface-container-high/80 rounded-xl p-3 border border-outline-variant/20 flex flex-col items-center">

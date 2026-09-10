@@ -11,6 +11,8 @@ DROP FUNCTION IF EXISTS call_number(UUID, TEXT, INT);
 DROP FUNCTION IF EXISTS calculate_lines(JSONB, INT[]);
 DROP FUNCTION IF EXISTS set_player_board(UUID, TEXT, JSONB);
 DROP FUNCTION IF EXISTS join_game(TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS set_game_mode(UUID, TEXT, INT);
+DROP FUNCTION IF EXISTS create_game(TEXT, TEXT, INT);
 DROP FUNCTION IF EXISTS create_game(TEXT, TEXT);
 DROP FUNCTION IF EXISTS claim_timeout_win(UUID, TEXT);
 DROP FUNCTION IF EXISTS heartbeat(UUID, TEXT);
@@ -32,6 +34,7 @@ CREATE TABLE games (
     current_turn_player_id UUID,
     winner_id UUID,
     target_lines INT NOT NULL DEFAULT 5,
+    board_size INT NOT NULL DEFAULT 5 CHECK (board_size IN (5, 10)),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -42,7 +45,7 @@ CREATE TABLE players (
     game_id UUID NOT NULL REFERENCES games(id) ON DELETE CASCADE,
     session_id TEXT NOT NULL,
     display_name TEXT NOT NULL,
-    board JSONB, -- Array of 25 numbers: [1, 14, 3, 22, 9, ...]
+    board JSONB, -- Array of numbers: 25 numbers for 5x5, 100 for 10x10
     is_ready BOOLEAN NOT NULL DEFAULT FALSE,
     player_number INT NOT NULL CHECK (player_number IN (1, 2)),
     connected BOOLEAN NOT NULL DEFAULT TRUE,
@@ -55,7 +58,7 @@ CREATE TABLE players (
 CREATE TABLE called_numbers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     game_id UUID NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-    number INT NOT NULL CHECK (number >= 1 AND number <= 25),
+    number INT NOT NULL CHECK (number >= 1 AND number <= 100),
     called_by UUID REFERENCES players(id) ON DELETE SET NULL,
     sequence INT NOT NULL,
     called_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -108,7 +111,8 @@ $$;
 -- CREATE GAME RPC
 CREATE OR REPLACE FUNCTION create_game(
     p_session_id TEXT,
-    p_display_name TEXT
+    p_display_name TEXT,
+    p_board_size INT DEFAULT 5
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -118,8 +122,15 @@ DECLARE
     v_room_code TEXT;
     v_game_id UUID;
     v_player_id UUID;
+    v_board_sz INT := COALESCE(p_board_size, 5);
+    v_target INT := CASE WHEN COALESCE(p_board_size, 5) = 10 THEN 10 ELSE 5 END;
     v_attempts INT := 0;
 BEGIN
+    IF v_board_sz NOT IN (5, 10) THEN
+        v_board_sz := 5;
+        v_target := 5;
+    END IF;
+
     LOOP
         v_room_code := generate_room_code();
         EXIT WHEN NOT EXISTS (SELECT 1 FROM games WHERE room_code = v_room_code AND status IN ('waiting', 'ready', 'playing'));
@@ -129,8 +140,8 @@ BEGIN
         END IF;
     END LOOP;
 
-    INSERT INTO games (room_code, status, target_lines)
-    VALUES (v_room_code, 'waiting', 5)
+    INSERT INTO games (room_code, status, target_lines, board_size)
+    VALUES (v_room_code, 'waiting', v_target, v_board_sz)
     RETURNING id INTO v_game_id;
 
     INSERT INTO players (game_id, session_id, display_name, player_number, is_ready, connected, last_seen_at)
@@ -142,7 +153,86 @@ BEGIN
         'room_code', v_room_code,
         'player_id', v_player_id,
         'player_number', 1,
+        'board_size', v_board_sz,
+        'target_lines', v_target,
         'status', 'waiting'
+    );
+END;
+$$;
+
+-- Overload for backwards compatibility
+CREATE OR REPLACE FUNCTION create_game(
+    p_session_id TEXT,
+    p_display_name TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    RETURN create_game(p_session_id, p_display_name, 5);
+END;
+$$;
+
+-- SET GAME MODE RPC (Host can switch 5x5 or 10x10 in waiting/ready state)
+CREATE OR REPLACE FUNCTION set_game_mode(
+    p_game_id UUID,
+    p_session_id TEXT,
+    p_board_size INT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_game RECORD;
+    v_player RECORD;
+    v_target INT;
+BEGIN
+    IF p_board_size NOT IN (5, 10) THEN
+        RAISE EXCEPTION 'Invalid board size: must be 5 or 10';
+    END IF;
+
+    SELECT * INTO v_game FROM games WHERE id = p_game_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Game not found';
+    END IF;
+
+    -- Only allowed in pre-match states
+    IF v_game.status NOT IN ('waiting', 'ready') THEN
+        RAISE EXCEPTION 'Cannot change game mode while game is %', v_game.status;
+    END IF;
+
+    -- Only Host (Player 1) can change game mode
+    SELECT * INTO v_player FROM players WHERE game_id = p_game_id AND session_id = p_session_id;
+    IF NOT FOUND OR v_player.player_number <> 1 THEN
+        RAISE EXCEPTION 'Only the host can change game mode';
+    END IF;
+
+    v_target := CASE WHEN p_board_size = 10 THEN 10 ELSE 5 END;
+
+    -- Update game
+    UPDATE games
+    SET board_size = p_board_size,
+        target_lines = v_target,
+        updated_at = NOW()
+    WHERE id = p_game_id;
+
+    -- Reset player boards and ready flags since dimensions changed
+    UPDATE players
+    SET board = NULL,
+        is_ready = FALSE,
+        last_seen_at = NOW()
+    WHERE game_id = p_game_id;
+
+    -- Clear any called numbers if present
+    DELETE FROM called_numbers WHERE game_id = p_game_id;
+
+    RETURN jsonb_build_object(
+        'success', TRUE,
+        'game_id', v_game.id,
+        'board_size', p_board_size,
+        'target_lines', v_target
     );
 END;
 $$;
@@ -177,6 +267,8 @@ BEGIN
             'room_code', v_game.room_code,
             'player_id', v_existing_player.id,
             'player_number', v_existing_player.player_number,
+            'board_size', v_game.board_size,
+            'target_lines', v_game.target_lines,
             'status', v_game.status,
             'is_reconnect', TRUE
         );
@@ -205,6 +297,8 @@ BEGIN
         'room_code', v_game.room_code,
         'player_id', v_player_id,
         'player_number', 2,
+        'board_size', v_game.board_size,
+        'target_lines', v_game.target_lines,
         'status', 'ready',
         'is_reconnect', FALSE
     );
@@ -212,7 +306,7 @@ END;
 $$;
 
 -- LINE CALCULATION HELPER
--- Computes the number of completed lines on a 5x5 board given an array of called numbers
+-- Computes the number of completed lines on a board (5x5 or 10x10) given an array of called numbers
 CREATE OR REPLACE FUNCTION calculate_lines(
     p_board JSONB,
     p_called_numbers INT[]
@@ -224,6 +318,8 @@ AS $$
 DECLARE
     v_board INT[];
     v_lines INT := 0;
+    v_len INT;
+    v_size INT;
     r INT;
     c INT;
     row_complete BOOLEAN;
@@ -231,18 +327,31 @@ DECLARE
     d1_complete BOOLEAN;
     d2_complete BOOLEAN;
 BEGIN
-    IF p_board IS NULL OR jsonb_array_length(p_board) <> 25 OR p_called_numbers IS NULL OR cardinality(p_called_numbers) < 5 THEN
+    IF p_board IS NULL THEN
+        RETURN 0;
+    END IF;
+
+    v_len := jsonb_array_length(p_board);
+    IF v_len = 100 THEN
+        v_size := 10;
+    ELSIF v_len = 25 THEN
+        v_size := 5;
+    ELSE
+        RETURN 0;
+    END IF;
+
+    IF p_called_numbers IS NULL OR cardinality(p_called_numbers) < v_size THEN
         RETURN 0;
     END IF;
 
     -- Convert JSONB array to Postgres INT array
     SELECT ARRAY(SELECT jsonb_array_elements_text(p_board)::INT) INTO v_board;
 
-    -- 1. Check 5 Rows
-    FOR r IN 0..4 LOOP
+    -- 1. Check Rows
+    FOR r IN 0..(v_size - 1) LOOP
         row_complete := TRUE;
-        FOR c IN 0..4 LOOP
-            IF NOT (v_board[r * 5 + c + 1] = ANY(p_called_numbers)) THEN
+        FOR c IN 0..(v_size - 1) LOOP
+            IF NOT (v_board[r * v_size + c + 1] = ANY(p_called_numbers)) THEN
                 row_complete := FALSE;
                 EXIT;
             END IF;
@@ -252,11 +361,11 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- 2. Check 5 Columns
-    FOR c IN 0..4 LOOP
+    -- 2. Check Columns
+    FOR c IN 0..(v_size - 1) LOOP
         col_complete := TRUE;
-        FOR r IN 0..4 LOOP
-            IF NOT (v_board[r * 5 + c + 1] = ANY(p_called_numbers)) THEN
+        FOR r IN 0..(v_size - 1) LOOP
+            IF NOT (v_board[r * v_size + c + 1] = ANY(p_called_numbers)) THEN
                 col_complete := FALSE;
                 EXIT;
             END IF;
@@ -266,10 +375,10 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- 3. Check Diagonal 1 (top-left to bottom-right: 0, 6, 12, 18, 24)
+    -- 3. Check Diagonal 1 (top-left to bottom-right)
     d1_complete := TRUE;
-    FOR r IN 0..4 LOOP
-        IF NOT (v_board[r * 5 + r + 1] = ANY(p_called_numbers)) THEN
+    FOR r IN 0..(v_size - 1) LOOP
+        IF NOT (v_board[r * v_size + r + 1] = ANY(p_called_numbers)) THEN
             d1_complete := FALSE;
             EXIT;
         END IF;
@@ -278,10 +387,10 @@ BEGIN
         v_lines := v_lines + 1;
     END IF;
 
-    -- 4. Check Diagonal 2 (top-right to bottom-left: 4, 8, 12, 16, 20)
+    -- 4. Check Diagonal 2 (top-right to bottom-left)
     d2_complete := TRUE;
-    FOR r IN 0..4 LOOP
-        IF NOT (v_board[r * 5 + (4 - r) + 1] = ANY(p_called_numbers)) THEN
+    FOR r IN 0..(v_size - 1) LOOP
+        IF NOT (v_board[r * v_size + (v_size - 1 - r) + 1] = ANY(p_called_numbers)) THEN
             d2_complete := FALSE;
             EXIT;
         END IF;
@@ -307,6 +416,7 @@ AS $$
 DECLARE
     v_player RECORD;
     v_game RECORD;
+    v_expected_count INT;
     v_num_count INT;
     v_distinct_count INT;
     v_other_ready BOOLEAN;
@@ -323,18 +433,20 @@ BEGIN
         RAISE EXCEPTION 'Player not found in this game';
     END IF;
 
-    -- Validate board structure: exactly 25 numbers, 1-25 with no repeats
-    IF p_board IS NULL OR jsonb_array_length(p_board) <> 25 THEN
-        RAISE EXCEPTION 'Board must contain exactly 25 numbers';
+    v_expected_count := v_game.board_size * v_game.board_size;
+
+    -- Validate board structure: exactly v_expected_count numbers, 1-v_expected_count with no repeats
+    IF p_board IS NULL OR jsonb_array_length(p_board) <> v_expected_count THEN
+        RAISE EXCEPTION 'Board must contain exactly % numbers', v_expected_count;
     END IF;
 
     SELECT COUNT(*), COUNT(DISTINCT (val::INT))
     INTO v_num_count, v_distinct_count
     FROM jsonb_array_elements_text(p_board) AS val
-    WHERE (val::INT) >= 1 AND (val::INT) <= 25;
+    WHERE (val::INT) >= 1 AND (val::INT) <= v_expected_count;
 
-    IF v_num_count <> 25 OR v_distinct_count <> 25 THEN
-        RAISE EXCEPTION 'Board must contain all numbers from 1 to 25 with no duplicates';
+    IF v_num_count <> v_expected_count OR v_distinct_count <> v_expected_count THEN
+        RAISE EXCEPTION 'Board must contain all numbers from 1 to % with no duplicates', v_expected_count;
     END IF;
 
     -- Update player board and set ready
@@ -417,8 +529,8 @@ BEGIN
     END IF;
 
     -- 4. Validate Number Range
-    IF p_number < 1 OR p_number > 25 THEN
-        RAISE EXCEPTION 'Called number must be between 1 and 25';
+    IF p_number < 1 OR p_number > (v_game.board_size * v_game.board_size) THEN
+        RAISE EXCEPTION 'Called number must be between 1 and %', (v_game.board_size * v_game.board_size);
     END IF;
 
     -- 5. Duplicate Prevention
@@ -627,6 +739,7 @@ BEGIN
             'current_turn_player_id', v_game.current_turn_player_id,
             'winner_id', v_game.winner_id,
             'target_lines', v_game.target_lines,
+            'board_size', v_game.board_size,
             'created_at', v_game.created_at
         ),
         'player', CASE WHEN v_caller.id IS NOT NULL THEN jsonb_build_object(
@@ -712,6 +825,8 @@ BEGIN
         'success', TRUE,
         'game_id', v_game.id,
         'room_code', v_game.room_code,
+        'board_size', v_game.board_size,
+        'target_lines', v_game.target_lines,
         'status', 'ready'
     );
 END;
@@ -720,7 +835,9 @@ $$;
 -- 5. EXPLICIT SECURITY & EXECUTION PERMISSIONS
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION create_game(TEXT, TEXT, INT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION create_game(TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION set_game_mode(UUID, TEXT, INT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION join_game(TEXT, TEXT, TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION set_player_board(UUID, TEXT, JSONB) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION call_number(UUID, TEXT, INT) TO anon, authenticated;
