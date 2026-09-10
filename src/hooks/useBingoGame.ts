@@ -82,12 +82,25 @@ export function useBingoGame(initialRoomCode?: string) {
     setGame(snapshot.game);
     if (snapshot.player) {
       const p = snapshot.player;
-      const isRematchOrReady = rematchStatusRef.current === 'accepted' || snapshot.game?.status === 'ready';
-      setPlayer(prev => ({
-        ...p,
-        board: isRematchOrReady ? (p.board || null) : (p.board || prev?.board || null),
-        is_ready: isRematchOrReady ? Boolean(p.is_ready) : (p.is_ready ?? prev?.is_ready ?? false),
-      }));
+      // During rematch setup: ALWAYS force board=null and is_ready=false regardless of what
+      // the DB returns. The DB may still hold the stale old board until rematch_game RPC
+      // completes. This prevents the old board from ever appearing on the new setup screen.
+      // rematchStatus is cleared back to 'idle' in setBoard() once the user confirms a new board.
+      if (rematchStatusRef.current === 'accepted') {
+        setPlayer(prev => ({
+          ...p,
+          board: null,
+          is_ready: false,
+          lines_completed: 0,
+        }));
+      } else {
+        const isReadyStatus = snapshot.game?.status === 'ready';
+        setPlayer(prev => ({
+          ...p,
+          board: isReadyStatus ? (p.board || null) : (p.board || prev?.board || null),
+          is_ready: isReadyStatus ? Boolean(p.is_ready) : (p.is_ready ?? prev?.is_ready ?? false),
+        }));
+      }
     }
     setP1(snapshot.p1);
     setP2(snapshot.p2);
@@ -638,6 +651,10 @@ export function useBingoGame(initialRoomCode?: string) {
           currentTurnPlayerId: data?.current_turn_player_id,
         },
       });
+
+      // Clear rematch flag BEFORE syncing so applySnapshot no longer forces board=null,
+      // allowing the new confirmed board to be loaded from DB correctly.
+      setRematchStatus(prev => prev === 'accepted' ? 'idle' : prev);
 
       await syncGameState(game.id);
     } catch (err: unknown) {
