@@ -27,7 +27,6 @@ export function useBingoGame(initialRoomCode?: string) {
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const sessionIdRef = useRef<string>('');
-  const lastHeartbeatRef = useRef<number>(Date.now());
   const opponentLastSeenRef = useRef<number>(Date.now());
   const gameRef = useRef<Game | null>(null);
   const reconnectAttemptRef = useRef<number>(0);
@@ -41,10 +40,6 @@ export function useBingoGame(initialRoomCode?: string) {
     return sessionIdRef.current;
   }, []);
 
-  // Initialize session ID on mount
-  useEffect(() => {
-    sessionIdRef.current = getSessionId();
-  }, []);
 
   useEffect(() => {
     gameRef.current = game;
@@ -63,7 +58,6 @@ export function useBingoGame(initialRoomCode?: string) {
   const isHost = player?.player_number === 1;
   const opponent = isHost ? p2 : p1;
   const isMyTurn = game?.status === 'playing' && game.current_turn_player_id === player?.id;
-  const isGameOver = game?.status === 'completed';
   const winner = game?.winner_id ? (game.winner_id === player?.id ? player : opponent) : null;
   const isWinner = Boolean(player && game?.winner_id && player.id === game.winner_id);
 
@@ -256,7 +250,6 @@ export function useBingoGame(initialRoomCode?: string) {
       setRematchStatus(prev => prev === 'received' ? 'idle' : prev);
       setRematchRequesterName(null);
     } else if (event === 'HEARTBEAT') {
-      lastHeartbeatRef.current = Date.now();
       opponentLastSeenRef.current = Date.now();
       setIsOpponentDisconnected(false);
     }
@@ -567,7 +560,7 @@ export function useBingoGame(initialRoomCode?: string) {
             type: 'broadcast',
             event: 'PLAYER_JOINED',
             payload: joinPayload,
-          }).catch(err => console.warn('Channel send error:', err));
+          }).catch(() => {});
         } else {
           const tempJoinChannel = supabase.channel(`notifier:${cleanCode}:${Date.now()}`);
           tempJoinChannel.subscribe((status) => {
@@ -707,7 +700,7 @@ export function useBingoGame(initialRoomCode?: string) {
           type: 'broadcast',
           event: 'NUMBER_CALLED',
           payload: result,
-        }).catch(err => console.warn('Realtime broadcast warning:', err));
+        }).catch(() => {});
       }
 
       // 3. Fast sync in background to guarantee full state integrity
@@ -798,7 +791,7 @@ export function useBingoGame(initialRoomCode?: string) {
           roomCode: game.room_code,
           acceptedBy: player?.id,
         },
-      }).catch(err => console.warn('Realtime rematch accept broadcast warning:', err));
+      }).catch(() => {});
     }
 
     setLoading(false);
@@ -824,7 +817,7 @@ export function useBingoGame(initialRoomCode?: string) {
             requesterId: player?.id,
             requesterName: player?.display_name || 'Opponent',
           },
-        }).catch(err => console.warn('Realtime rematch request broadcast warning:', err));
+        }).catch(() => {});
       }
     } finally {
       setLoading(false);
@@ -845,7 +838,7 @@ export function useBingoGame(initialRoomCode?: string) {
           declinedBy: player?.id,
           declinerName: player?.display_name || 'Opponent',
         },
-      }).catch(err => console.warn('Realtime rematch decline broadcast warning:', err));
+      }).catch(() => {});
     }
   }, [game?.id, player?.display_name, player?.id]);
 
@@ -861,7 +854,7 @@ export function useBingoGame(initialRoomCode?: string) {
           gameId: game.id,
           cancelledBy: player?.id,
         },
-      }).catch(err => console.warn('Realtime rematch cancel broadcast warning:', err));
+      }).catch(() => {});
     }
   }, [game?.id, player?.id]);
 
@@ -882,7 +875,6 @@ export function useBingoGame(initialRoomCode?: string) {
     myLines,
     opponentLines,
     isMyTurn,
-    isGameOver,
     winner,
     isWinner,
     isHost,
@@ -906,7 +898,6 @@ export function useBingoGame(initialRoomCode?: string) {
     setOnRematchDeclined: (cb: (() => void) | null) => { onRematchDeclinedRef.current = cb; },
     /** Register a callback that fires the moment a REMATCH_ACCEPTED broadcast is received */
     setOnRematchAccepted: (cb: (() => void) | null) => { onRematchAcceptedRef.current = cb; },
-    refreshState: () => game?.id && syncGameState(game.id),
     resetGame: () => {
       clearActiveRoomCode();
       setGame(null);

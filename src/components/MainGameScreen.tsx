@@ -104,11 +104,9 @@ interface MainGameScreenProps {
   calledNumbers: CalledNumber[];
   isMyTurn: boolean;
   myLines: number;
-  opponentLines?: number;
   playerName: string;
   opponentName: string;
   onCallNumber: (num: number) => Promise<void>;
-  onSurrender?: () => void;
   loading: boolean;
   optimisticCalled?: number | null;
 }

@@ -30,7 +30,6 @@ export default function App() {
     myLines,
     opponentLines,
     isMyTurn,
-    isGameOver,
     winner,
     isWinner,
     loading,
@@ -266,7 +265,6 @@ export default function App() {
               calledNumbers={calledNumbers}
               isMyTurn={isMyTurn}
               myLines={myLines}
-              opponentLines={opponentLines}
               playerName={player.display_name}
               opponentName={opponentName}
               onCallNumber={callNumber}
