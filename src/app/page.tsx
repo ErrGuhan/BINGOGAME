@@ -43,6 +43,7 @@ export default function App() {
     setBoard,
     callNumber,
     claimTimeoutWin,
+    requestRematch,
     resetGame,
   } = useBingoGame();
 
@@ -72,8 +73,10 @@ export default function App() {
         setScreen('create');
       }
     } else if (game.status === 'ready') {
-      // Auto-navigate challenger to setup if they are not already on setup
-      if (player?.player_number === 2 && !player?.is_ready && screen !== 'setup') {
+      // Auto-navigate to setup on rematch or when challenger joins
+      if (screen === 'victory' || (!player?.is_ready && screen !== 'setup' && screen !== 'create')) {
+        setScreen('setup');
+      } else if (player?.player_number === 2 && !player?.is_ready && screen !== 'setup') {
         setScreen('setup');
       }
     } else if (game.status === 'playing') {
@@ -137,12 +140,15 @@ export default function App() {
     }
   };
 
-  // Handle Rematch
+  // Handle Rematch (keeps room code, player session, and transitions to board setup)
   const handleRematch = async () => {
-    clearActiveRoomCode();
-    resetGame();
     sounds.playTap();
-    await handleStartCreate();
+    setScreen('setup');
+    try {
+      await requestRematch();
+    } catch (err) {
+      console.error('Rematch request error:', err);
+    }
   };
 
   // Handle Back To Home

@@ -26,23 +26,40 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   static getDerivedStateFromError(error: Error): Partial<State> {
+    // Never intercept Next.js navigation redirects
+    if (
+      error?.message === 'NEXT_REDIRECT' ||
+      (error as unknown as { digest?: string })?.digest?.startsWith('NEXT_REDIRECT')
+    ) {
+      throw error;
+    }
     const savedRoom = getActiveRoomCode();
     return { hasError: true, error, savedRoom };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    if (
+      error?.message === 'NEXT_REDIRECT' ||
+      (error as unknown as { digest?: string })?.digest?.startsWith('NEXT_REDIRECT')
+    ) {
+      return;
+    }
     console.error('Unhandled Bingo UI Glitch caught by ErrorBoundary:', error, errorInfo);
     this.setState({ errorInfo });
   }
 
   handleRecover = () => {
     // Reloads window to cleanly re-mount React while preserving room session in localStorage
-    window.location.reload();
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
   };
 
   handleReset = () => {
     clearActiveRoomCode();
-    window.location.href = '/';
+    if (typeof window !== 'undefined') {
+      window.location.href = '/';
+    }
   };
 
   render() {
@@ -119,7 +136,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   Diagnostic Information
                 </summary>
                 <div className="mt-space-2xs p-space-2xs bg-black/40 rounded font-mono text-[10px] overflow-x-auto text-error/90 whitespace-pre-wrap max-h-32">
-                  {error.toString()}
+                  {error.stack || error.toString()}
                 </div>
               </details>
             )}

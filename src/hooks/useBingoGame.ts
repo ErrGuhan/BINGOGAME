@@ -184,6 +184,22 @@ export function useBingoGame(initialRoomCode?: string) {
         current_turn_player_id: null,
       } : null);
       sounds.playVictory();
+    } else if (event === 'REMATCH_STARTED') {
+      sounds.playDraft(520);
+      setCalledNumbers([]);
+      setOptimisticCalled(null);
+      setPlayer(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
+      setP1(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
+      setP2(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
+      setGame(prev => prev ? {
+        ...prev,
+        status: 'ready',
+        winner_id: null,
+        current_turn_player_id: null,
+      } : null);
+      if (gameRef.current?.id) {
+        syncGameState(gameRef.current.id);
+      }
     } else if (event === 'HEARTBEAT') {
       lastHeartbeatRef.current = Date.now();
       opponentLastSeenRef.current = Date.now();
@@ -223,6 +239,7 @@ export function useBingoGame(initialRoomCode?: string) {
         .on('broadcast', { event: 'NUMBER_CALLED' }, ({ payload }) => handleRealtimeEventRef.current('NUMBER_CALLED', payload))
         .on('broadcast', { event: 'PLAYER_JOINED' }, ({ payload }) => handleRealtimeEventRef.current('PLAYER_JOINED', payload))
         .on('broadcast', { event: 'PLAYER_READY' }, ({ payload }) => handleRealtimeEventRef.current('PLAYER_READY', payload))
+        .on('broadcast', { event: 'REMATCH_STARTED' }, ({ payload }) => handleRealtimeEventRef.current('REMATCH_STARTED', payload))
         .on('broadcast', { event: 'TIMEOUT_WIN_CLAIMED' }, ({ payload }) => handleRealtimeEventRef.current('TIMEOUT_WIN_CLAIMED', payload))
         .on('broadcast', { event: 'HEARTBEAT' }, ({ payload }) => handleRealtimeEventRef.current('HEARTBEAT', payload))
         // Direct Database Postgres Changes: Fires in ~50ms whenever a number is called in Supabase
@@ -472,34 +489,44 @@ export function useBingoGame(initialRoomCode?: string) {
 
       // Broadcast to Room that Player 2 joined so Host receives immediate notification
       if (!data.is_reconnect && data.player_number === 2) {
-        const joinChannel = supabase.channel(`room:${cleanCode}`);
-        joinChannel.subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            joinChannel.send({
-              type: 'broadcast',
-              event: 'PLAYER_JOINED',
-              payload: {
-                player: {
-                  id: data.player_id,
-                  session_id: sessionId,
-                  display_name: name,
-                  player_number: 2,
-                  board: null,
-                  is_ready: false,
-                  connected: true,
-                  lines_completed: 0,
-                  last_seen_at: new Date().toISOString(),
-                },
-              },
-            }).then(() => {
-              setTimeout(() => {
-                supabase.removeChannel(joinChannel);
-              }, 1000);
-            }).catch(() => {
-              supabase.removeChannel(joinChannel);
-            });
-          }
-        });
+        const joinPayload = {
+          player: {
+            id: data.player_id,
+            session_id: sessionId,
+            display_name: name,
+            player_number: 2 as const,
+            board: null,
+            is_ready: false,
+            connected: true,
+            lines_completed: 0,
+            last_seen_at: new Date().toISOString(),
+          },
+        };
+
+        if (channelRef.current) {
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'PLAYER_JOINED',
+            payload: joinPayload,
+          }).catch(err => console.warn('Channel send error:', err));
+        } else {
+          const tempJoinChannel = supabase.channel(`notifier:${cleanCode}:${Date.now()}`);
+          tempJoinChannel.subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              tempJoinChannel.send({
+                type: 'broadcast',
+                event: 'PLAYER_JOINED',
+                payload: joinPayload,
+              }).then(() => {
+                setTimeout(() => {
+                  supabase.removeChannel(tempJoinChannel);
+                }, 1000);
+              }).catch(() => {
+                supabase.removeChannel(tempJoinChannel);
+              });
+            }
+          });
+        }
       }
 
       await syncGameState(data.game_id);
@@ -649,6 +676,58 @@ export function useBingoGame(initialRoomCode?: string) {
     }
   }, [game?.id, getSession, handleRealtimeEvent]);
 
+  // ACTION: Request Rematch (Resets match state on server and notifies room via Realtime)
+  const requestRematch = useCallback(async () => {
+    if (!game?.id) return;
+    setLoading(true);
+    setError(null);
+    const sessionId = getSession();
+
+    // 1. Locally reset match state immediately while preserving room code and player session
+    setCalledNumbers([]);
+    setOptimisticCalled(null);
+    setPlayer(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
+    setP1(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
+    setP2(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
+    setGame(prev => prev ? {
+      ...prev,
+      status: 'ready',
+      winner_id: null,
+      current_turn_player_id: null,
+    } : null);
+
+    // 2. Broadcast to opponent via Realtime channel
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'REMATCH_STARTED',
+        payload: {
+          gameId: game.id,
+          roomCode: game.room_code,
+          initiatedBy: player?.id,
+        },
+      }).catch(err => console.warn('Realtime rematch broadcast warning:', err));
+    }
+
+    // 3. Call server-side rematch RPC
+    try {
+      const supabase = getSupabase();
+      if (supabase && isSupabaseConfigured()) {
+        const { error } = await supabase.rpc('rematch_game', {
+          p_game_id: game.id,
+          p_session_id: sessionId,
+        });
+        if (error && error.code !== 'PGRST202') {
+          console.warn('Server rematch RPC note:', error);
+        }
+      }
+    } catch (err) {
+      console.warn('Rematch RPC failed, using realtime reset fallback:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [game?.id, game?.room_code, getSession, player?.id]);
+
   // Auto-connect if initialRoomCode provided
   useEffect(() => {
     if (initialRoomCode && !game) {
@@ -680,6 +759,7 @@ export function useBingoGame(initialRoomCode?: string) {
     setBoard,
     callNumber,
     claimTimeoutWin,
+    requestRematch,
     refreshState: () => game?.id && syncGameState(game.id),
     resetGame: () => {
       clearActiveRoomCode();

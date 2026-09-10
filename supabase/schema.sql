@@ -15,6 +15,7 @@ DROP FUNCTION IF EXISTS create_game(TEXT, TEXT);
 DROP FUNCTION IF EXISTS claim_timeout_win(UUID, TEXT);
 DROP FUNCTION IF EXISTS heartbeat(UUID, TEXT);
 DROP FUNCTION IF EXISTS get_game_state(UUID, TEXT);
+DROP FUNCTION IF EXISTS rematch_game(UUID, TEXT);
 DROP FUNCTION IF EXISTS generate_room_code();
 
 DROP TABLE IF EXISTS called_numbers CASCADE;
@@ -664,6 +665,58 @@ BEGIN
 END;
 $$;
 
+-- REMATCH GAME RPC
+-- Resets match-specific state for a room so both players can setup new boards without destroying room/session
+CREATE OR REPLACE FUNCTION rematch_game(
+    p_game_id UUID,
+    p_session_id TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_game RECORD;
+    v_player RECORD;
+BEGIN
+    SELECT * INTO v_game FROM games WHERE id = p_game_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Game not found';
+    END IF;
+
+    -- Verify caller is a player in this game
+    SELECT * INTO v_player FROM players WHERE game_id = p_game_id AND session_id = p_session_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Player not found in this game';
+    END IF;
+
+    -- Delete all called numbers for this game
+    DELETE FROM called_numbers WHERE game_id = p_game_id;
+
+    -- Reset game status to ready, clearing winner and turn
+    UPDATE games
+    SET status = 'ready',
+        winner_id = NULL,
+        current_turn_player_id = NULL,
+        updated_at = NOW()
+    WHERE id = p_game_id;
+
+    -- Reset players: unready, clear previous boards, update last_seen
+    UPDATE players
+    SET is_ready = FALSE,
+        board = NULL,
+        last_seen_at = NOW()
+    WHERE game_id = p_game_id;
+
+    RETURN jsonb_build_object(
+        'success', TRUE,
+        'game_id', v_game.id,
+        'room_code', v_game.room_code,
+        'status', 'ready'
+    );
+END;
+$$;
+
 -- 5. EXPLICIT SECURITY & EXECUTION PERMISSIONS
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon, authenticated;
@@ -674,4 +727,5 @@ GRANT EXECUTE ON FUNCTION call_number(UUID, TEXT, INT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION claim_timeout_win(UUID, TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION heartbeat(UUID, TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_game_state(UUID, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION rematch_game(UUID, TEXT) TO anon, authenticated;
 

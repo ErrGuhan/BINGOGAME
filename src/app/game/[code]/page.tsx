@@ -1,19 +1,17 @@
 'use client';
 
-import React, { use, useState, useEffect } from 'react';
+import React, { use, useState, useEffect, Suspense } from 'react';
 import { Header } from '@/components/Header';
 import { BoardSetupScreen } from '@/components/BoardSetupScreen';
 import { MainGameScreen } from '@/components/MainGameScreen';
 import { VictoryScreen } from '@/components/VictoryScreen';
 import { ReconnectingModal } from '@/components/ReconnectingModal';
 import { useBingoGame } from '@/hooks/useBingoGame';
+import { clearActiveRoomCode } from '@/lib/gameEngine';
 import { useRouter } from 'next/navigation';
 
-export default function GameRoomPage({ params }: { params: Promise<{ code: string }> }) {
-  const resolvedParams = use(params);
-  const roomCode = resolvedParams.code?.toUpperCase() || '';
+function GameRoomContent({ roomCode }: { roomCode: string }) {
   const router = useRouter();
-
   const [hasJoined, setHasJoined] = useState(false);
 
   const {
@@ -37,6 +35,7 @@ export default function GameRoomPage({ params }: { params: Promise<{ code: strin
     setBoard,
     callNumber,
     claimTimeoutWin,
+    requestRematch,
     resetGame,
   } = useBingoGame();
 
@@ -53,6 +52,20 @@ export default function GameRoomPage({ params }: { params: Promise<{ code: strin
     await setBoard(boardData);
   };
 
+  const handleExitToArena = () => {
+    clearActiveRoomCode();
+    resetGame();
+    router.push('/');
+  };
+
+  const handleRematch = async () => {
+    try {
+      await requestRematch();
+    } catch (err) {
+      console.error('Failed to request rematch:', err);
+    }
+  };
+
   const opponentName = opponent?.display_name || (player?.player_number === 1 ? (p2?.display_name || 'Challenger') : (p1?.display_name || 'Host'));
 
   return (
@@ -62,10 +75,7 @@ export default function GameRoomPage({ params }: { params: Promise<{ code: strin
         badgeType="match"
         subTitle={`Room #${roomCode}`}
         showBack={true}
-        onBack={() => {
-          resetGame();
-          router.push('/');
-        }}
+        onBack={handleExitToArena}
       />
 
       <main className="flex flex-col relative z-10 w-full min-h-screen px-container-padding-mobile pt-16 pb-12 bg-transparent justify-center">
@@ -74,8 +84,8 @@ export default function GameRoomPage({ params }: { params: Promise<{ code: strin
             {error}
             <div className="mt-2">
               <button
-                onClick={() => router.push('/')}
-                className="px-4 py-1.5 rounded-lg bg-surface text-on-surface text-xs font-bold"
+                onClick={handleExitToArena}
+                className="px-4 py-1.5 rounded-lg bg-surface text-on-surface text-xs font-bold cursor-pointer"
               >
                 Back to Arena
               </button>
@@ -83,12 +93,12 @@ export default function GameRoomPage({ params }: { params: Promise<{ code: strin
           </div>
         )}
 
-        {/* Board Setup State */}
+        {/* Board Setup State (waiting/ready before play) */}
         {game?.status !== 'playing' && game?.status !== 'completed' && (
           <BoardSetupScreen
             initialAutoFill={true}
             onConfirmBoard={handleBoardConfirmed}
-            onBack={() => router.push('/')}
+            onBack={handleExitToArena}
             loading={loading}
             isReady={Boolean(player?.is_ready)}
             opponentName={opponentName}
@@ -118,7 +128,7 @@ export default function GameRoomPage({ params }: { params: Promise<{ code: strin
           )
         )}
 
-        {/* Victory State */}
+        {/* Victory State (Match completed: rematch keeps room code & context) */}
         {game?.status === 'completed' && (
           <VictoryScreen
             isWinner={isWinner}
@@ -128,8 +138,8 @@ export default function GameRoomPage({ params }: { params: Promise<{ code: strin
             myLines={myLines}
             opponentLines={opponentLines}
             totalCalls={calledNumbers.length}
-            onRematch={() => router.push('/')}
-            onBackToHome={() => router.push('/')}
+            onRematch={handleRematch}
+            onBackToHome={handleExitToArena}
           />
         )}
 
@@ -140,10 +150,28 @@ export default function GameRoomPage({ params }: { params: Promise<{ code: strin
             opponentName={opponentName}
             countdown={reconnectCountdown}
             onClaimTimeoutWin={claimTimeoutWin}
-            onSurrender={() => router.push('/')}
+            onSurrender={handleExitToArena}
           />
         )}
       </main>
     </>
+  );
+}
+
+export default function GameRoomPage({ params }: { params: Promise<{ code: string }> }) {
+  const resolvedParams = use(params);
+  const roomCode = resolvedParams.code?.toUpperCase() || '';
+
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-col items-center justify-center min-h-screen text-center">
+          <span className="w-10 h-10 border-4 border-primary-container border-t-transparent rounded-full animate-spin mb-4" />
+          <p className="text-on-surface-variant font-bold text-sm">Loading Duel Arena...</p>
+        </div>
+      }
+    >
+      <GameRoomContent roomCode={roomCode} />
+    </Suspense>
   );
 }
