@@ -50,6 +50,8 @@ export default function App() {
     rematchStatus,
     rematchRequesterName,
     resetGame,
+    setOnRematchDeclined,
+    setOnRematchAccepted,
   } = useBingoGame();
 
   // Auto-restore active game room on initial mount
@@ -93,22 +95,25 @@ export default function App() {
     }
   }, [game?.status, player?.is_ready, player?.player_number, screen, rematchStatus]);
 
-  // Auto-navigate to setup when rematch is accepted
+  // Register rematch event callbacks (avoids React state-batching race conditions)
   React.useEffect(() => {
-    if (rematchStatus === 'accepted') {
+    // When opponent ACCEPTS our rematch request — go to board setup
+    setOnRematchAccepted(() => () => {
       setScreen('setup');
-    }
-  }, [rematchStatus]);
-
-  // When rematch is rejected, redirect both players to home
-  React.useEffect(() => {
-    if (rematchStatus === 'declined') {
+    });
+    // When opponent DECLINES our rematch request — clean up and go home
+    setOnRematchDeclined(() => () => {
       sounds.playAlert();
       clearActiveRoomCode();
       resetGame();
       setScreen('home');
-    }
-  }, [rematchStatus]);
+    });
+    return () => {
+      setOnRematchAccepted(null);
+      setOnRematchDeclined(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Handle Home -> Create Game
   const handleStartCreate = async () => {

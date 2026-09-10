@@ -43,6 +43,8 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
     rematchStatus,
     rematchRequesterName,
     resetGame,
+    setOnRematchDeclined,
+    setOnRematchAccepted,
   } = useBingoGame();
 
   useEffect(() => {
@@ -64,15 +66,25 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
     router.push('/');
   };
 
-  // When rematch is rejected, redirect both players to home page
+  // Register rematch event callbacks (avoids React state-batching race conditions)
   useEffect(() => {
-    if (rematchStatus === 'declined') {
-      sounds.playAlert();
+    // When requester receives REMATCH_DECLINED broadcast — clean up and go home
+    setOnRematchDeclined(() => () => {
       clearActiveRoomCode();
       resetGame();
       router.push('/');
-    }
-  }, [rematchStatus, router]);
+    });
+    // When recipient receives REMATCH_ACCEPTED broadcast — no extra navigation needed:
+    // the component conditionally renders BoardSetupScreen when rematchStatus === 'accepted'
+    setOnRematchAccepted(() => () => {
+      // state is already updated in the hook; component re-renders to BoardSetupScreen
+    });
+    return () => {
+      setOnRematchDeclined(null);
+      setOnRematchAccepted(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
   const handleRematch = async () => {
     try {
@@ -161,6 +173,7 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
             onAcceptRematch={acceptRematch}
             onDeclineRematch={() => {
               declineRematch();
+              // Navigate decliner to home immediately (requester is handled via callback)
               handleExitToArena();
             }}
             onCancelRematchRequest={cancelRematchRequest}

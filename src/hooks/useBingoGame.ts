@@ -21,6 +21,10 @@ export function useBingoGame(initialRoomCode?: string) {
   const [rematchStatus, setRematchStatus] = useState<'idle' | 'requesting' | 'received' | 'accepted' | 'declined'>('idle');
   const [rematchRequesterName, setRematchRequesterName] = useState<string | null>(null);
 
+  // External callbacks for rematch events — set by pages to avoid state-watching race conditions
+  const onRematchDeclinedRef = useRef<(() => void) | null>(null);
+  const onRematchAcceptedRef = useRef<(() => void) | null>(null);
+
   const channelRef = useRef<RealtimeChannel | null>(null);
   const sessionIdRef = useRef<string>('');
   const lastHeartbeatRef = useRef<number>(Date.now());
@@ -225,11 +229,16 @@ export function useBingoGame(initialRoomCode?: string) {
         winner_id: null,
         current_turn_player_id: null,
       } : null);
+      // Fire callback so pages can navigate to board setup screen immediately
+      onRematchAcceptedRef.current?.();
     } else if (event === 'REMATCH_DECLINED') {
       const d = data as { declinerName?: string };
-      setRematchStatus('declined');
+      // Only update state for the requester (the decliner already set to 'idle' in declineRematch)
+      setRematchStatus(prev => prev === 'requesting' ? 'declined' : prev);
       setRematchRequesterName(d.declinerName || 'Opponent');
       sounds.playAlert();
+      // Fire callback immediately so pages can redirect without depending on state transitions
+      onRematchDeclinedRef.current?.();
     } else if (event === 'REMATCH_CANCELLED') {
       setRematchStatus(prev => prev === 'received' ? 'idle' : prev);
       setRematchRequesterName(null);
@@ -876,6 +885,10 @@ export function useBingoGame(initialRoomCode?: string) {
     cancelRematchRequest,
     rematchStatus,
     rematchRequesterName,
+    /** Register a callback that fires the moment a REMATCH_DECLINED broadcast is received */
+    setOnRematchDeclined: (cb: (() => void) | null) => { onRematchDeclinedRef.current = cb; },
+    /** Register a callback that fires the moment a REMATCH_ACCEPTED broadcast is received */
+    setOnRematchAccepted: (cb: (() => void) | null) => { onRematchAcceptedRef.current = cb; },
     refreshState: () => game?.id && syncGameState(game.id),
     resetGame: () => {
       clearActiveRoomCode();
