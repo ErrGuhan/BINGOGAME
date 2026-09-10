@@ -60,7 +60,7 @@ export default function App() {
   React.useEffect(() => {
     const savedRoom = getActiveRoomCode();
     if (savedRoom) {
-      joinGame(savedRoom)
+      joinGame(savedRoom, undefined, true)
         .then(() => {
           // Successfully restored room
         })

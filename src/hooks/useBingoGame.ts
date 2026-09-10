@@ -65,7 +65,7 @@ export function useBingoGame(initialRoomCode?: string) {
   const opponentLines = isHost ? (p2?.lines_completed || 0) : (p1?.lines_completed || 0);
 
   const boardSize: BoardSize = (game?.board_size === 10 ? 10 : 5);
-  const targetLines: number = game?.target_lines || (boardSize === 10 ? 10 : 5);
+  const targetLines: number = boardSize === 10 ? 10 : 5;
 
   // Sync state from snapshot
   const applySnapshot = useCallback((snapshot: GameStateSnapshot | null) => {
@@ -76,7 +76,20 @@ export function useBingoGame(initialRoomCode?: string) {
       return;
     }
 
-    setGame(snapshot.game);
+    setGame(prev => {
+      if (!snapshot.game) return null;
+      const dbBoardSize = snapshot.game.board_size;
+      const resolvedBoardSize: BoardSize = (dbBoardSize === 10 || dbBoardSize === 5)
+        ? dbBoardSize
+        : (prev?.board_size === 10 ? 10 : 5);
+      const resolvedTarget = resolvedBoardSize === 10 ? 10 : 5;
+
+      return {
+        ...snapshot.game,
+        board_size: resolvedBoardSize,
+        target_lines: resolvedTarget,
+      };
+    });
     if (snapshot.player) {
       const p = snapshot.player;
       // During rematch setup: ALWAYS force board=null and is_ready=false regardless of what
@@ -189,6 +202,16 @@ export function useBingoGame(initialRoomCode?: string) {
       setP2(p);
       setGame(prev => prev ? { ...prev, status: 'ready' } : null);
       sounds.playDraft(640);
+      // If host, broadcast current game mode so joined player syncs to 10x10 if selected
+      if (playerRef.current?.player_number === 1 && channelRef.current) {
+        const currentSize = gameRef.current?.board_size || 5;
+        const currentTarget = gameRef.current?.target_lines || (currentSize === 10 ? 10 : 5);
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'GAME_MODE_CHANGED',
+          payload: { boardSize: currentSize, targetLines: currentTarget },
+        }).catch(() => {});
+      }
       if (gameRef.current?.id) {
         syncGameState(gameRef.current.id);
       }
@@ -463,7 +486,7 @@ export function useBingoGame(initialRoomCode?: string) {
     return () => clearInterval(timer);
   }, [isOpponentDisconnected, game?.status]);
 
-  // ACTION: Create Game (Supabase Server-Side RPC)
+  // ACTION: Create Game (Supabase Server-Side RPC with backward-compatible fallback)
   const createGame = useCallback(async (displayName?: string, initialBoardSize: BoardSize = 5) => {
     setLoading(true);
     setError(null);
@@ -477,21 +500,44 @@ export function useBingoGame(initialRoomCode?: string) {
         throw new Error('Supabase is not configured. Please check your environment variables in .env.local.');
       }
 
-      const { data, error } = await supabase.rpc('create_game', {
+      // Try 3-arg RPC first (for upgraded databases with board_size parameter)
+      let data: any = null;
+      let rpcError: any = null;
+
+      const res3 = await supabase.rpc('create_game', {
         p_session_id: sessionId,
         p_display_name: name,
         p_board_size: initialBoardSize,
       });
 
-      if (error) {
-        if (error.code === 'PGRST202' || error.code === 'PGRST205') {
-          throw new Error('Supabase functions not yet installed. Please run supabase/schema.sql in your Supabase SQL Editor!');
+      if (res3.error) {
+        // Fallback to legacy 2-arg signature if 3-arg is missing from schema cache
+        if (res3.error.code === 'PGRST202' || res3.error.code === 'PGRST205') {
+          const res2 = await supabase.rpc('create_game', {
+            p_session_id: sessionId,
+            p_display_name: name,
+          });
+          if (res2.error) {
+            rpcError = res2.error;
+          } else {
+            data = res2.data;
+          }
+        } else {
+          rpcError = res3.error;
         }
-        throw error;
+      } else {
+        data = res3.data;
       }
 
-      const chosenBoardSize = (data.board_size as BoardSize) || initialBoardSize;
-      const targetWinLines = data.target_lines || (chosenBoardSize === 10 ? 10 : 5);
+      if (rpcError) {
+        if (rpcError.code === 'PGRST202' || rpcError.code === 'PGRST205') {
+          throw new Error('Supabase functions not yet installed. Please run supabase/migration_10x10.sql in your Supabase SQL Editor!');
+        }
+        throw rpcError;
+      }
+
+      const chosenBoardSize = (data?.board_size as BoardSize) || initialBoardSize;
+      const targetWinLines = data?.target_lines || (chosenBoardSize === 10 ? 10 : 5);
 
       // Synchronously populate host game state
       const initialHost: Player = {
@@ -579,9 +625,11 @@ export function useBingoGame(initialRoomCode?: string) {
   }, [game?.id, player?.player_number, getSession]);
 
   // ACTION: Join Game (Supabase Server-Side RPC)
-  const joinGame = useCallback(async (roomCode: string, displayName?: string) => {
-    setLoading(true);
-    setError(null);
+  const joinGame = useCallback(async (roomCode: string, displayName?: string, silent: boolean = false) => {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     const name = displayName || getPlayerName();
     setPlayerName(name);
     const sessionId = getSession();
@@ -601,12 +649,21 @@ export function useBingoGame(initialRoomCode?: string) {
 
       if (error) {
         if (error.code === 'PGRST202' || error.code === 'PGRST205') {
-          throw new Error('Supabase functions not yet installed. Please run supabase/schema.sql in your Supabase SQL Editor!');
+          throw new Error('Supabase functions not yet installed. Please run supabase/migration_10x10.sql in your Supabase SQL Editor!');
         }
         throw error;
       }
 
       setActiveRoomCode(cleanCode);
+
+      if (data?.board_size) {
+        const joinedBoardSize = data.board_size as BoardSize;
+        setGame(prev => prev ? {
+          ...prev,
+          board_size: joinedBoardSize,
+          target_lines: data.target_lines || (joinedBoardSize === 10 ? 10 : 5),
+        } : null);
+      }
 
       // Broadcast to Room that Player 2 joined so Host receives immediate notification
       if (!data.is_reconnect && data.player_number === 2) {
@@ -654,10 +711,14 @@ export function useBingoGame(initialRoomCode?: string) {
       return data;
     } catch (err: unknown) {
       const msg = (err as Error).message || 'Failed to join game room';
-      setError(msg);
+      if (!silent) {
+        setError(msg);
+      }
       throw err;
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [getSession, syncGameState]);
 
@@ -690,7 +751,7 @@ export function useBingoGame(initialRoomCode?: string) {
 
       if (error) {
         if (error.code === 'PGRST202' || error.code === 'PGRST205') {
-          throw new Error('Supabase functions not yet installed. Please run supabase/schema.sql in your Supabase SQL Editor!');
+          throw new Error('Supabase functions not yet installed. Please run supabase/migration_10x10.sql in your Supabase SQL Editor!');
         }
         throw error;
       }
@@ -720,7 +781,10 @@ export function useBingoGame(initialRoomCode?: string) {
 
       await syncGameState(game.id);
     } catch (err: unknown) {
-      const msg = (err as Error).message || 'Failed to confirm board';
+      let msg = (err as Error).message || 'Failed to confirm board';
+      if (msg.includes('25 numbers') && board.length === 100) {
+        msg = '10x10 Mega Mode requires database update. Please run supabase/migration_10x10.sql in Supabase SQL Editor, or switch to Classic 5x5.';
+      }
       setError(msg);
       throw err;
     } finally {
@@ -777,7 +841,10 @@ export function useBingoGame(initialRoomCode?: string) {
     } catch (err: unknown) {
       // Rollback on rejection (e.g., turn desync)
       setOptimisticCalled(null);
-      const msg = (err as Error).message || 'Call rejected';
+      let msg = (err as Error).message || 'Call rejected';
+      if (msg.includes('between 1 and 25') && number > 25) {
+        msg = '10x10 Mega Mode requires database update. Please run supabase/migration_10x10.sql in Supabase SQL Editor.';
+      }
       setError(msg);
       sounds.playAlert();
     }
@@ -930,9 +997,9 @@ export function useBingoGame(initialRoomCode?: string) {
   // Auto-connect if initialRoomCode provided
   useEffect(() => {
     if (initialRoomCode && !game) {
-      joinGame(initialRoomCode).catch(() => {});
+      joinGame(initialRoomCode, undefined, true).catch(() => {});
     }
-  }, [initialRoomCode]);
+  }, [initialRoomCode, joinGame]);
 
   return {
     game,
