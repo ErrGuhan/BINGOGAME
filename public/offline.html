@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1222" />
+  <title>No Connection — BingoDuel</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --surface: #0f1222;
+      --surface-container: #1c1f2f;
+      --surface-container-high: #26293a;
+      --on-surface: #e0e1f8;
+      --on-surface-variant: #b9cac4;
+      --primary-container: #00f5d4;
+      --primary-fixed: #26fedc;
+      --outline-variant: #3a4a46;
+      --secondary-container: #6f00be;
+    }
+
+    html, body {
+      min-height: 100dvh;
+      background-color: var(--surface);
+      color: var(--on-surface);
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+      overflow: hidden;
+    }
+
+    /* Ambient background blobs */
+    .bg-blobs {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 0;
+    }
+    .blob {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.15;
+    }
+    .blob-1 { width: 320px; height: 320px; background: var(--primary-container); top: -80px; left: -60px; }
+    .blob-2 { width: 340px; height: 340px; background: var(--secondary-container); top: 33%; right: -80px; opacity: 0.25; }
+    .blob-3 { width: 280px; height: 280px; background: var(--primary-container); bottom: -60px; left: 25%; opacity: 0.1; }
+
+    .card {
+      position: relative;
+      z-index: 1;
+      width: min(420px, calc(100vw - 32px));
+      background: rgba(28, 31, 47, 0.85);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 24px;
+      padding: 40px 32px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+      box-shadow: 0 32px 64px rgba(0,0,0,0.5);
+      text-align: center;
+    }
+
+    .icon-wrap {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, rgba(0,245,212,0.15), rgba(111,0,190,0.15));
+      border: 1px solid rgba(255,255,255,0.12);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .wifi-icon {
+      width: 44px;
+      height: 44px;
+      opacity: 0.6;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #26fedc, #ddb7ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1.2;
+    }
+
+    p {
+      font-size: 0.875rem;
+      color: var(--on-surface-variant);
+      line-height: 1.6;
+      max-width: 300px;
+    }
+
+    .divider {
+      width: 48px;
+      height: 2px;
+      background: linear-gradient(90deg, var(--primary-container), var(--secondary-container));
+      border-radius: 2px;
+      opacity: 0.5;
+    }
+
+    .try-again-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #26fedc, #00f5d4);
+      color: #00201a;
+      font-size: 0.875rem;
+      font-weight: 900;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      transition: filter 0.15s, transform 0.1s;
+      box-shadow: 0 0 24px rgba(0,245,212,0.4);
+      letter-spacing: 0.01em;
+    }
+    .try-again-btn:hover { filter: brightness(1.05); }
+    .try-again-btn:active { transform: scale(0.97); }
+
+    .hint {
+      font-size: 0.7rem;
+      color: var(--on-surface-variant);
+      opacity: 0.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-blobs">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+
+  <div class="card" role="main">
+    <div class="icon-wrap" aria-hidden="true">
+      <!-- WiFi-off SVG icon -->
+      <svg class="wifi-icon" viewBox="0 0 24 24" fill="none" stroke="#00f5d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="1" y1="1" x2="23" y2="23"/>
+        <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/>
+        <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/>
+        <path d="M10.71 5.05A16 16 0 0 1 22.56 9"/>
+        <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/>
+        <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+        <circle cx="12" cy="20" r="1" fill="#00f5d4" stroke="none"/>
+      </svg>
+    </div>
+
+    <h1>You're Offline</h1>
+    <div class="divider"></div>
+    <p>BingoDuel needs an internet connection for real-time matches. Connect to Wi-Fi or mobile data to continue dueling.</p>
+
+    <button
+      class="try-again-btn"
+      onclick="window.location.reload()"
+      aria-label="Try again"
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="1 4 1 10 7 10"/>
+        <path d="M3.51 15a9 9 0 1 0 .49-3.77"/>
+      </svg>
+      Try Again
+    </button>
+
+    <span class="hint">If you were in a match, return to the game once you're back online.</span>
+  </div>
+</body>
+</html>

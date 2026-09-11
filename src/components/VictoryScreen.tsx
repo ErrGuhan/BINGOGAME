@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import confetti from 'canvas-confetti';
 import { sounds } from './AudioController';
+import { usePWA } from '@/context/PWAContext';
 
 import { BoardSize } from '@/types/bingo';
 
@@ -43,6 +44,9 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
   onCancelRematchRequest,
   onBackToHome,
 }) => {
+  const { isInstalled, installPromptEvent, isIOS, showInstallPrompt } = usePWA();
+  const [showIOSGuide, setShowIOSGuide] = useState(false);
+
   useEffect(() => {
     sounds.playVictory();
 
@@ -221,7 +225,50 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
           <span className="material-symbols-outlined text-[18px]">home</span>
           <span>Back to Arena</span>
         </button>
+
+        {/* Install BingoDuel App CTA */}
+        {!isInstalled && (installPromptEvent || isIOS) && (
+          <button
+            type="button"
+            onClick={async () => {
+              sounds.playTap();
+              if (installPromptEvent) {
+                await showInstallPrompt();
+              } else if (isIOS) {
+                setShowIOSGuide(true);
+              }
+            }}
+            className="w-full h-12 rounded-2xl bg-surface-container-high/60 hover:bg-surface-container-high text-primary-fixed font-bold text-sm border border-primary-container/40 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary-container/10 cursor-pointer mt-1"
+          >
+            <span className="material-symbols-outlined text-[20px]">install_mobile</span>
+            <span>Install BingoDuel App</span>
+          </button>
+        )}
       </div>
+
+      {/* iOS Install Instructions Modal */}
+      {showIOSGuide && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-surface-container-high p-6 border border-outline-variant/30 flex flex-col items-center text-center gap-4 shadow-2xl">
+            <div className="w-12 h-12 rounded-2xl bg-primary-container/20 flex items-center justify-center text-primary-fixed">
+              <span className="material-symbols-outlined text-[28px]">ios_share</span>
+            </div>
+            <h3 className="font-headline-sm text-lg font-black text-on-surface">Install on iOS</h3>
+            <p className="font-body-sm text-xs text-on-surface-variant leading-relaxed">
+              1. Tap the <strong className="text-on-surface font-semibold">Share</strong> button in Safari&apos;s bottom toolbar.<br />
+              2. Scroll down and tap <strong className="text-on-surface font-semibold">&apos;Add to Home Screen&apos;</strong>.<br />
+              3. Tap <strong className="text-primary-fixed font-semibold">&apos;Add&apos;</strong> in the top right.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowIOSGuide(false)}
+              className="w-full h-10 rounded-xl bg-primary-container text-black font-bold text-xs hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

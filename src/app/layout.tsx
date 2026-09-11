@@ -2,6 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { Outfit, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { PWAProvider } from "@/context/PWAContext";
+import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
+import { UpdateToast } from "@/components/UpdateToast";
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -18,10 +21,23 @@ const plusJakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "BINGO — Real-Time 1v1 Duel Arena",
-  description: "High-stakes real-time 1v1 competitive Bingo web game built on live synchronized matrices.",
+  title: "BingoDuel — Real-time 1v1 Bingo",
+  description: "Real-time 1v1 head-to-head Bingo duels on synchronized boards.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "BingoDuel",
+  },
   icons: {
-    icon: "/logo.svg",
+    icon: [
+      { url: "/logo.svg" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      { url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
   },
 };
 
@@ -56,7 +72,11 @@ export default function RootLayout({
           <div className="absolute top-1/3 -right-24 w-88 h-88 rounded-full bg-secondary-container/25 blur-[90px]" />
           <div className="absolute -bottom-20 left-1/4 w-72 h-72 rounded-full bg-primary-container/10 blur-[80px]" />
         </div>
-        <ErrorBoundary>{children}</ErrorBoundary>
+        <PWAProvider>
+          <ServiceWorkerRegistration />
+          <UpdateToast />
+          <ErrorBoundary>{children}</ErrorBoundary>
+        </PWAProvider>
       </body>
     </html>
   );
