@@ -2,17 +2,13 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { sounds } from './AudioController';
-import { generateRandomBoard } from '@/lib/gameEngine';
 import { BoardSize } from '@/types/bingo';
 
 // ─── Memoized board cell for BoardSetup ────────────────────────────────────────
 // Extracted so React.memo can bail out when a cell's props haven't changed.
-// On a 10x10 board a chip click previously re-rendered all 100 cells;
-// now only the one whose index, value, or selection changed re-renders.
 interface BoardSetupCellProps {
   idx: number;
   val: number | null;
-  isSelected: boolean;
   isReady: boolean;
   boardSize: BoardSize;
   onClick: (idx: number) => void;
@@ -21,7 +17,6 @@ interface BoardSetupCellProps {
 const BoardSetupCell = React.memo(function BoardSetupCell({
   idx,
   val,
-  isSelected,
   isReady,
   boardSize,
   onClick,
@@ -36,16 +31,14 @@ const BoardSetupCell = React.memo(function BoardSetupCell({
       className={`relative aspect-square flex items-center justify-center transition-all ${
         boardSize === 10 ? 'rounded-md' : 'rounded-xl'
       } ${
-        isSelected
-          ? 'bg-surface-bright border-2 border-primary-container shadow-[0_0_16px_rgba(0,245,212,0.45)] text-primary-fixed scale-[1.03] z-10'
-          : isFilled
-          ? 'bg-surface-container-high/90 text-on-surface hover:bg-surface-bright font-black shadow-sm border border-outline-variant/20'
-          : 'bg-surface-container-high/40 text-on-surface-variant/30 border border-outline-variant/15 hover:bg-surface-container-high'
+        isFilled
+          ? 'bg-surface-container-high/90 text-on-surface font-black shadow-sm border border-primary-container/30 hover:bg-error-container/20 hover:border-error/40 active:scale-95'
+          : 'bg-surface-container-high/40 text-on-surface-variant/20 border border-dashed border-outline-variant/20 hover:bg-primary-container/10 hover:border-primary-container/40 active:scale-95 cursor-pointer'
       }`}
     >
       {isFilled ? (
         <span
-          className={`font-black ${
+          className={`font-black text-primary-fixed ${
             boardSize === 10
               ? 'text-[11px] sm:text-xs leading-none'
               : 'text-base'
@@ -55,8 +48,8 @@ const BoardSetupCell = React.memo(function BoardSetupCell({
         </span>
       ) : (
         <span
-          className={`material-symbols-outlined opacity-40 ${
-            boardSize === 10 ? 'text-[12px]' : 'text-[16px]'
+          className={`material-symbols-outlined opacity-25 ${
+            boardSize === 10 ? 'text-[10px]' : 'text-[14px]'
           }`}
         >
           add
@@ -83,17 +76,10 @@ interface BoardSetupScreenProps {
 const HEADERS_5 = ['B', 'I', 'N', 'G', 'O'];
 const HEADERS_10 = ['B', 'I', 'N', 'G', 'O', 'D', 'U', 'E', 'L', '!'];
 
-const TRAY_RANGES = [
-  { label: '1–25', start: 1, end: 25 },
-  { label: '26–50', start: 26, end: 50 },
-  { label: '51–75', start: 51, end: 75 },
-  { label: '76–100', start: 76, end: 100 },
-];
-
 export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
   boardSize = 5,
   targetLines = 5,
-  initialAutoFill = true,
+  initialAutoFill = false,
   isHost = false,
   onSwitchMode,
   onConfirmBoard,
@@ -103,89 +89,70 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
   opponentName = 'Opponent',
 }) => {
   const totalCells = boardSize * boardSize;
-  const [board, setBoard] = useState<(number | null)[]>(() => Array(totalCells).fill(null));
-  const [activeIndex, setActiveIndex] = useState<number>(0);
-  const [trayRangeIndex, setTrayRangeIndex] = useState<number>(0);
 
-  // Initialize or re-initialize board when boardSize or initialAutoFill changes
+  // Board: array of placed numbers (null = empty)
+  const [board, setBoard] = useState<(number | null)[]>(() => Array(totalCells).fill(null));
+  // nextNumber: sequence counter — next tap on an empty cell assigns this value
+  const [nextNumber, setNextNumber] = useState<number>(1);
+
+  // Re-initialize board whenever boardSize changes
   useEffect(() => {
-    if (initialAutoFill) {
-      setBoard(generateRandomBoard(boardSize));
-      setActiveIndex(-1);
-    } else {
-      setBoard(Array(totalCells).fill(null));
-      setActiveIndex(0);
-    }
-  }, [boardSize, initialAutoFill, totalCells]);
+    setBoard(Array(totalCells).fill(null));
+    setNextNumber(1);
+  }, [boardSize, totalCells]);
 
   const placedCount = useMemo(() => board.filter(v => v !== null).length, [board]);
   const isComplete = placedCount === totalCells;
   const usedNumbers = useMemo(() => new Set(board.filter((v): v is number => v !== null)), [board]);
 
+  // Tap-to-assign: empty cell → assign nextNumber; filled cell → clear it
   const handleCellClick = useCallback((idx: number) => {
     if (isReady) return;
-    sounds.playTap();
-    if (board[idx] !== null) {
+    const current = board[idx];
+    if (current !== null) {
+      // Clear the cell. nextNumber does NOT decrement — future taps continue from current counter.
+      sounds.playTap();
       const nextBoard = [...board];
       nextBoard[idx] = null;
       setBoard(nextBoard);
-      setActiveIndex(idx);
     } else {
-      setActiveIndex(idx);
+      // Only assign if we still have numbers left in sequence
+      if (nextNumber > totalCells) return;
+      sounds.playDraft(440 + (nextNumber % 25) * 18);
+      const nextBoard = [...board];
+      nextBoard[idx] = nextNumber;
+      setBoard(nextBoard);
+      setNextNumber(prev => prev + 1);
     }
-  }, [board, isReady]);
+  }, [board, isReady, nextNumber, totalCells]);
 
-  const handleTrayChipClick = useCallback((num: number) => {
-    if (isReady || usedNumbers.has(num)) return;
-
-    let target = activeIndex;
-    if (target === -1 || board[target] !== null) {
-      target = board.findIndex(v => v === null);
-    }
-    if (target === -1) return;
-
-    sounds.playDraft(440 + (num % 25) * 18);
-    const nextBoard = [...board];
-    nextBoard[target] = num;
-    setBoard(nextBoard);
-
-    // Find next empty index
-    const nextEmpty = nextBoard.findIndex(v => v === null);
-    setActiveIndex(nextEmpty);
-  }, [board, isReady, usedNumbers, activeIndex]);
-
-  const handleShuffle = () => {
-    sounds.playLineComplete();
-    setBoard(generateRandomBoard(boardSize));
-    setActiveIndex(-1);
-  };
-
-  const handleClear = () => {
-    sounds.playTap();
-    setBoard(Array(totalCells).fill(null));
-    setActiveIndex(0);
-  };
-
-  const handleFillRemaining = () => {
+  // Shuffle = auto-fill ALL remaining empty cells with remaining unused numbers (random order)
+  const handleShuffle = useCallback(() => {
     sounds.playLineComplete();
     const remainingNums: number[] = [];
     for (let i = 1; i <= totalCells; i++) {
       if (!usedNumbers.has(i)) remainingNums.push(i);
     }
-    // Shuffle remaining numbers
+    // Fisher-Yates shuffle of remaining numbers
     for (let i = remainingNums.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [remainingNums[i], remainingNums[j]] = [remainingNums[j], remainingNums[i]];
     }
-
     let remIdx = 0;
     const nextBoard = board.map(val => {
       if (val !== null) return val;
       return remainingNums[remIdx++];
     });
     setBoard(nextBoard);
-    setActiveIndex(-1);
-  };
+    setNextNumber(totalCells + 1); // all filled
+  }, [board, totalCells, usedNumbers]);
+
+  // Clear = reset board to all-empty and restart counter from 1
+  const handleClear = useCallback(() => {
+    sounds.playTap();
+    setBoard(Array(totalCells).fill(null));
+    setNextNumber(1);
+  }, [totalCells]);
 
   const handleConfirm = () => {
     if (!isComplete || loading) return;
@@ -194,15 +161,6 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
   };
 
   const headers = boardSize === 10 ? HEADERS_10 : HEADERS_5;
-
-  // Numbers to display in the tray
-  const trayNumbers = useMemo(() => {
-    if (boardSize === 5) {
-      return Array.from({ length: 25 }, (_, i) => i + 1);
-    }
-    const currentRange = TRAY_RANGES[trayRangeIndex];
-    return Array.from({ length: currentRange.end - currentRange.start + 1 }, (_, i) => currentRange.start + i);
-  }, [boardSize, trayRangeIndex]);
 
   return (
     <div className="flex flex-col w-full max-w-md mx-auto gap-3 select-none pt-1 pb-6">
@@ -225,8 +183,12 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
           <span className="font-label-sm text-[11px] font-black uppercase tracking-wider bg-secondary-container/25 text-secondary-fixed px-2.5 py-1 rounded-full border border-secondary/30">
             {boardSize === 10 ? 'Mega 10x10' : 'Classic 5x5'}
           </span>
-          <span className="font-label-sm text-xs font-black text-primary-fixed bg-primary-container/20 px-3 py-1 rounded-full border border-primary-container/30">
-            {isComplete ? `Complete (${totalCells}/${totalCells})` : `${placedCount}/${totalCells}`}
+          <span className={`font-label-sm text-xs font-black px-3 py-1 rounded-full border ${
+            isComplete
+              ? 'text-primary-fixed bg-primary-container/25 border-primary-container/40'
+              : 'text-on-surface-variant bg-surface-container-high/60 border-outline-variant/20'
+          }`}>
+            {isComplete ? `\u2713 ${totalCells}/${totalCells}` : `${placedCount}/${totalCells}`}
           </span>
         </div>
       </div>
@@ -274,6 +236,21 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
         </div>
       )}
 
+      {/* Instruction hint: shows next number in sequence */}
+      {!isReady && !isComplete && (
+        <div className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl bg-surface-container/60 border border-outline-variant/15">
+          <div className="flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-primary-container text-[15px]">touch_app</span>
+            <span className="text-[11px] text-on-surface-variant font-bold">
+              Tap empty cells to place numbers in order
+            </span>
+          </div>
+          <span className="text-[11px] text-primary-fixed font-black tabular-nums shrink-0">
+            Next: <span className="text-primary-container">#{nextNumber}</span>
+          </span>
+        </div>
+      )}
+
       {/* Bingo Board Container */}
       <div className="w-full aspect-square bg-surface-container/90 backdrop-blur-2xl rounded-2xl p-2.5 sm:p-3 shadow-2xl border border-outline-variant/30 flex flex-col justify-between">
         {/* Column Headers (B-I-N-G-O or B-I-N-G-O-D-U-E-L-!) */}
@@ -305,7 +282,6 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
               key={idx}
               idx={idx}
               val={val}
-              isSelected={idx === activeIndex}
               isReady={isReady}
               boardSize={boardSize}
               onClick={handleCellClick}
@@ -313,77 +289,6 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
           ))}
         </div>
       </div>
-
-      {/* Number Tray (Shown if board is not complete) */}
-      {!isComplete && (
-        <div className="w-full bg-surface-container/70 backdrop-blur-md rounded-2xl p-3 border border-outline-variant/30 flex flex-col gap-2 shadow-md">
-          {/* Header with Tray Title and Fill Remaining */}
-          <div className="flex items-center justify-between px-1">
-            <span className="font-label-sm text-[11px] text-on-surface font-bold">
-              Tap Numbers to Place:
-            </span>
-            <div className="flex items-center gap-2">
-              <span className="font-label-sm text-[11px] text-tertiary-fixed font-bold">
-                {totalCells - placedCount} Remaining
-              </span>
-              {placedCount > 0 && placedCount < totalCells && (
-                <button
-                  type="button"
-                  onClick={handleFillRemaining}
-                  className="text-[10px] font-black uppercase text-primary-fixed bg-primary-container/20 hover:bg-primary-container/35 px-2 py-0.5 rounded-full border border-primary-container/30 transition-all active:scale-95"
-                >
-                  ⚡ Fill Remaining
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* 10x10 Range Tabs */}
-          {boardSize === 10 && (
-            <div className="grid grid-cols-4 gap-1 p-0.5 rounded-xl bg-surface-container-lowest/70 border border-outline-variant/20">
-              {TRAY_RANGES.map((r, i) => (
-                <button
-                  key={r.label}
-                  type="button"
-                  onClick={() => {
-                    sounds.playTap();
-                    setTrayRangeIndex(i);
-                  }}
-                  className={`py-1 rounded-lg text-[10px] font-black transition-all ${
-                    trayRangeIndex === i
-                      ? 'bg-surface-container-high text-primary-fixed shadow-sm border border-primary-container/30'
-                      : 'text-on-surface-variant hover:text-on-surface'
-                  }`}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Chips Grid */}
-          <div className="grid grid-cols-7 sm:grid-cols-9 gap-1.5 max-h-32 overflow-y-auto p-1 scrollbar-thin">
-            {trayNumbers.map(num => {
-              const isUsed = usedNumbers.has(num);
-              return (
-                <button
-                  key={num}
-                  type="button"
-                  disabled={isUsed || isReady}
-                  onClick={() => handleTrayChipClick(num)}
-                  className={`h-7 rounded-lg font-bold text-xs transition-all flex items-center justify-center ${
-                    isUsed
-                      ? 'bg-surface-container-lowest/40 text-outline line-through opacity-30 cursor-not-allowed'
-                      : 'bg-surface-container-high hover:bg-surface-bright text-primary-fixed border border-outline-variant/20 active:scale-95'
-                  }`}
-                >
-                  {num}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Actions */}
       {isReady ? (
@@ -404,10 +309,12 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
       ) : (
         <div className="flex flex-col gap-2 w-full">
           <div className="grid grid-cols-4 gap-2">
+            {/* Shuffle = fills remaining empty cells randomly */}
             <button
               type="button"
               onClick={handleShuffle}
-              className="col-span-1 h-12 rounded-xl bg-surface-container-high hover:bg-surface-bright text-on-surface active:scale-95 transition-all text-xs font-bold border border-outline-variant/20 flex items-center justify-center gap-1"
+              disabled={isComplete}
+              className="col-span-1 h-12 rounded-xl bg-surface-container-high hover:bg-surface-bright text-on-surface active:scale-95 transition-all text-xs font-bold border border-outline-variant/20 flex items-center justify-center gap-1 disabled:opacity-40 disabled:pointer-events-none"
             >
               <span className="material-symbols-outlined text-[18px]">casino</span>
               <span>Shuffle</span>
@@ -416,7 +323,8 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
             <button
               type="button"
               onClick={handleClear}
-              className="col-span-1 h-12 rounded-xl bg-surface-container-high hover:bg-surface-bright text-on-surface hover:text-error active:scale-95 transition-all text-xs font-bold border border-outline-variant/20 flex items-center justify-center gap-1"
+              disabled={placedCount === 0}
+              className="col-span-1 h-12 rounded-xl bg-surface-container-high hover:bg-surface-bright text-on-surface hover:text-error active:scale-95 transition-all text-xs font-bold border border-outline-variant/20 flex items-center justify-center gap-1 disabled:opacity-40 disabled:pointer-events-none"
             >
               <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
               <span>Clear</span>
@@ -429,11 +337,17 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
               className="col-span-2 h-12 rounded-xl bg-gradient-to-r from-primary-fixed to-primary-container text-on-primary-fixed font-headline-sm text-sm font-black shadow-[0_0_20px_rgba(0,245,212,0.4)] active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none hover:brightness-105"
             >
               <span className="material-symbols-outlined text-[20px]">
-                {isComplete ? 'check_circle' : 'lock_clock'}
+                {loading ? 'hourglass_top' : isComplete ? 'check_circle' : 'lock_clock'}
               </span>
               <span>{loading ? 'Locking...' : 'Lock Board & Play'}</span>
             </button>
           </div>
+          {/* Partial-fill shortcut hint */}
+          {placedCount > 0 && placedCount < totalCells && (
+            <p className="text-center text-[10px] text-on-surface-variant/50 font-medium">
+              {totalCells - placedCount} remaining — tap Shuffle to auto-fill the rest
+            </p>
+          )}
         </div>
       )}
     </div>

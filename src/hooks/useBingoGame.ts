@@ -144,10 +144,14 @@ export function useBingoGame(initialRoomCode?: string) {
       const snapP1 = snapshot.p1;
       const hasFull100 = Boolean(prev?.board && prev.board.length === 100);
       const snapHasFull100 = Boolean(snapP1.board && snapP1.board.length === 100);
+      // During rematch epoch, trust DB is_ready directly (don't preserve stale true from previous game)
+      const isReadyVal = matchEpochRef.current > 1
+        ? Boolean(snapP1.is_ready)
+        : Boolean(snapP1.is_ready || prev?.is_ready);
       return {
         ...snapP1,
         board: hasFull100 && !snapHasFull100 ? prev!.board : (snapP1.board || prev?.board || null),
-        is_ready: Boolean(snapP1.is_ready || prev?.is_ready),
+        is_ready: isReadyVal,
       };
     });
 
@@ -156,15 +160,20 @@ export function useBingoGame(initialRoomCode?: string) {
       const snapP2 = snapshot.p2;
       const hasFull100 = Boolean(prev?.board && prev.board.length === 100);
       const snapHasFull100 = Boolean(snapP2.board && snapP2.board.length === 100);
+      // During rematch epoch, trust DB is_ready directly (don't preserve stale true from previous game)
+      const isReadyVal = matchEpochRef.current > 1
+        ? Boolean(snapP2.is_ready)
+        : Boolean(snapP2.is_ready || prev?.is_ready);
       return {
         ...snapP2,
         board: hasFull100 && !snapHasFull100 ? prev!.board : (snapP2.board || prev?.board || null),
-        is_ready: Boolean(snapP2.is_ready || prev?.is_ready),
+        is_ready: isReadyVal,
       };
     });
 
-    // Stale call guard: during fresh rematch setup, ignore old called numbers from previous game
-    if (matchEpochRef.current > 1 && gameRef.current?.status === 'ready') {
+    // Rematch guard: clear called numbers when server confirms 0 calls (DB deleted them)
+    // Use snapshot data rather than stale gameRef.current to avoid async ref race.
+    if (matchEpochRef.current > 1 && snapshot.called_numbers?.length === 0) {
       setCalledNumbers([]);
     } else if (snapshot.called_numbers && snapshot.called_numbers.length > 0) {
       // Preserve any client-side calls that legacy DB might not support (>25)
@@ -302,23 +311,17 @@ export function useBingoGame(initialRoomCode?: string) {
         setP2(prev => prev && prev.id === d.playerId ? { ...prev, is_ready: true } : prev);
       }
 
-      // Check if both players are ready
-      const isCurrentPlayerReady = Boolean(playerRef.current?.is_ready);
-      const isOpponentNowReady = Boolean(d.playerId && d.playerId !== playerRef.current?.id);
-      const isOpponentAlreadyReady = Boolean(
-        playerRef.current?.player_number === 1 ? p2Ref.current?.is_ready : p1Ref.current?.is_ready
-      );
-      const bothReady = Boolean(d.allReady || (isCurrentPlayerReady && (isOpponentNowReady || isOpponentAlreadyReady)));
-
-      if (bothReady) {
-        const firstTurnId = d.currentTurnPlayerId || p1Ref.current?.id || playerRef.current?.id || null;
+      // Only transition to 'playing' when the server has confirmed both players are ready.
+      // Avoid stale-ref heuristics — trust d.allReady (which is set from rpcData.all_ready on the sender's side).
+      if (d.allReady && d.currentTurnPlayerId) {
         setGame(prev => prev ? {
           ...prev,
           status: 'playing',
-          current_turn_player_id: firstTurnId,
+          current_turn_player_id: d.currentTurnPlayerId!,
         } : null);
         sounds.playLineComplete();
       }
+      // Always sync from server to get authoritative game state (handles both clients)
       if (gameRef.current?.id) {
         syncGameState(gameRef.current.id);
       }
@@ -892,21 +895,25 @@ export function useBingoGame(initialRoomCode?: string) {
         rpcSuccess = true;
       }
 
-      // Check if opponent is already ready
-      const opponentIsReady = Boolean(
-        player?.player_number === 1 ? p2Ref.current?.is_ready : p1Ref.current?.is_ready
-      );
-      const isAllReady = Boolean(rpcData?.all_ready || opponentIsReady);
-      const turnId = rpcData?.current_turn_player_id || p1Ref.current?.id || (player?.player_number === 1 ? player.id : opponent?.id);
+      // Trust server truth exclusively for allReady — never use stale refs (p1Ref/p2Ref) here.
+      // The set_player_board RPC atomically sets status='playing' when both boards are submitted.
+      // rpcData.all_ready is the authoritative answer from Postgres.
+      const isAllReady = Boolean(rpcData?.all_ready);
+      const turnId = rpcData?.current_turn_player_id || null;
 
-      if (isAllReady) {
+      // If server confirmed both are ready, optimistically update own state immediately
+      // (the other player will receive PLAYER_READY broadcast and also update).
+      if (isAllReady && turnId) {
         setGame(prev => prev ? {
           ...prev,
           status: 'playing',
           current_turn_player_id: turnId,
         } : null);
+        sounds.playLineComplete();
       }
 
+      // Broadcast to opponent so they can transition immediately too.
+      // allReady comes from server truth; currentTurnPlayerId is server-assigned.
       channelRef.current?.send({
         type: 'broadcast',
         event: 'PLAYER_READY',
@@ -917,19 +924,23 @@ export function useBingoGame(initialRoomCode?: string) {
           currentTurnPlayerId: turnId,
           boardSize: currentGameBoardSize,
         },
-      }).catch(() => {});
+      }).catch((broadcastErr) => {
+        console.warn('[setBoard] PLAYER_READY broadcast failed:', broadcastErr);
+      });
 
       // Clear rematch flag
       setRematchStatus(prev => prev === 'accepted' ? 'idle' : prev);
 
-      if (rpcSuccess) {
-        syncGameState(game.id).catch(() => {});
-      }
+      // Always sync from server after board is set — this drives the transition via postgres_changes
+      // for both clients regardless of broadcast delivery.
+      syncGameState(game.id).catch((syncErr) => {
+        console.warn('[setBoard] syncGameState failed:', syncErr);
+      });
     } catch (err: unknown) {
       // Surface errors to the UI — a silent console.warn means players never know
       // why "Lock Board & Play" appears to do nothing.
       const msg = (err as Error).message || 'Failed to lock board';
-      console.error('[setBoard] error:', msg, err);
+      console.error('[setBoard] RPC error:', msg, err);
       setError(msg);
       // Roll back the optimistic ready state so the player can retry
       setPlayer(prev => prev ? { ...prev, is_ready: false } : null);

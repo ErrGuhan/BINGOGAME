@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { CalledNumber, BoardSize } from '@/types/bingo';
 import { calculateLines } from '@/lib/gameEngine';
 import { sounds } from './AudioController';
@@ -53,6 +53,7 @@ const BingoGridCell = React.memo(function BingoGridCell({
             ? 'text-[10px] sm:text-xs leading-none font-black'
             : 'font-label-tile-mobile text-label-tile-mobile'
         } ${isMarked ? 'line-through opacity-90 font-extrabold' : ''}`}
+        style={isMarked ? { textDecorationThickness: '3px' } : undefined}
       >
         {num}
       </span>
@@ -148,6 +149,15 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
   const [isCalling, setIsCalling] = useState<boolean>(false);
   const [showNumberPad, setShowNumberPad] = useState<boolean>(false);
   const [callerTrayRangeIndex, setCallerTrayRangeIndex] = useState<number>(0);
+  // Auto-dismiss completion banner
+  const [showCompletionBanner, setShowCompletionBanner] = useState<boolean>(false);
+  const prevLinesRef = useRef<number>(0);
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset selection to null at the start of every turn (player must actively choose)
+  useEffect(() => {
+    setSelectedNumber(null);
+  }, [isMyTurn]);
 
   const totalNumbers = boardSize * boardSize;
   const allNumbers = useMemo(
@@ -179,15 +189,19 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
     [completedLines]
   );
 
-  // Pre-select first available number on board when it becomes player's turn
+  // Auto-dismiss banner when a new line is completed (must be after completedLines is computed)
   useEffect(() => {
-    if (isMyTurn && (selectedNumber === null || calledNumbersSet.has(selectedNumber))) {
-      const firstAvailable =
-        board.find(n => !calledNumbersSet.has(n)) ||
-        allNumbers.find(n => !calledNumbersSet.has(n));
-      if (firstAvailable) setSelectedNumber(firstAvailable);
+    if (completedLines.length > prevLinesRef.current) {
+      prevLinesRef.current = completedLines.length;
+      setShowCompletionBanner(true);
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+      bannerTimerRef.current = setTimeout(() => setShowCompletionBanner(false), 800);
     }
-  }, [isMyTurn, calledNumbersSet, board, selectedNumber, allNumbers]);
+    return () => {
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    };
+  }, [completedLines.length]);
+
 
   // Handle number call submission — memoized so the Call button skips re-renders
   // when isMyTurn, selectedNumber, isCalling, and loading are all unchanged.
@@ -338,8 +352,8 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
       {/* 3. Hero Bingo Matrix (Direct Tap to Select) */}
       <section className="w-full relative">
         <div className="w-full aspect-square bg-surface-container/90 backdrop-blur-2xl rounded-2xl p-2 sm:p-2.5 shadow-2xl border border-outline-variant/30 relative overflow-hidden flex flex-col justify-between">
-          {/* Winning Line Overlay Banner */}
-          {completedLines.length > 0 && (
+          {/* Winning Line Overlay Banner — auto-dismisses after 800ms */}
+          {showCompletionBanner && (
             <div className="absolute inset-0 pointer-events-none z-20 flex items-center justify-center">
               <div className="px-3.5 py-1.5 rounded-full bg-surface-container-lowest/95 shadow-[0_0_24px_rgba(0,245,212,0.85)] border-2 border-primary-container flex items-center gap-1.5 animate-bounce">
                 <span className="material-symbols-outlined text-primary-fixed text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
@@ -365,10 +379,17 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
             }`}
           >
             {headers.map((letter, idx) => (
-              <div key={idx} className="tracking-wider drop-shadow-sm">
-                {letter}
-              </div>
-            ))}
+            <div
+              key={idx}
+              className={`tracking-wider drop-shadow-sm transition-all ${
+                idx < completedLines.length
+                  ? 'line-through opacity-40 text-primary-container'
+                  : ''
+              }`}
+            >
+              {letter}
+            </div>
+          ))}
           </div>
 
           {/* Grid Board (Memoized Cells) */}
