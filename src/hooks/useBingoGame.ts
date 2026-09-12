@@ -69,7 +69,17 @@ export function useBingoGame(initialRoomCode?: string) {
 
   const isHost = player?.player_number === 1;
   const opponent = isHost ? p2 : p1;
-  const isMyTurn = game?.status === 'playing' && game.current_turn_player_id === player?.id;
+
+  // Strict Turn Invariant:
+  // When game is 'playing', determine activeTurnPlayerId strictly.
+  // Falls back to p1Id initially if current_turn_player_id is not yet set.
+  // Exactly ONE player will ever have isMyTurn === true.
+  const p1Id = p1?.id || (player?.player_number === 1 ? player.id : null);
+  const activeTurnPlayerId = game?.status === 'playing'
+    ? (game.current_turn_player_id || p1Id || null)
+    : null;
+  const isMyTurn = Boolean(game?.status === 'playing' && player?.id && activeTurnPlayerId === player.id);
+
   const winner = game?.winner_id ? (game.winner_id === player?.id ? player : opponent) : null;
   const isWinner = Boolean(player && game?.winner_id && player.id === game.winner_id);
 
@@ -103,11 +113,17 @@ export function useBingoGame(initialRoomCode?: string) {
         : (prev?.board_size === 10 ? 10 : 5);
       const resolvedTarget = resolvedBoardSize === 10 ? 10 : 5;
 
+      // Ensure current_turn_player_id is never wiped to null during 'playing' state
+      const resolvedTurnId = snapshot.game.status === 'playing'
+        ? (snapshot.game.current_turn_player_id || prev?.current_turn_player_id || snapshot.p1?.id || null)
+        : snapshot.game.current_turn_player_id;
+
       return {
         ...snapshot.game,
         status: (matchEpochRef.current > 1 && snapshot.game.status === 'completed' && prev?.status) ? prev.status : snapshot.game.status,
         board_size: resolvedBoardSize,
         target_lines: resolvedTarget,
+        current_turn_player_id: resolvedTurnId,
       };
     });
 
@@ -172,20 +188,21 @@ export function useBingoGame(initialRoomCode?: string) {
       };
     });
 
-    // Rematch guard: clear called numbers when server confirms 0 calls (DB deleted them)
-    // Use snapshot data rather than stale gameRef.current to avoid async ref race.
+    // Authoritative called numbers merge:
+    // If in rematch epoch and server confirms 0 calls, clear calls.
     if (matchEpochRef.current > 1 && snapshot.called_numbers?.length === 0) {
       setCalledNumbers([]);
-    } else if (snapshot.called_numbers && snapshot.called_numbers.length > 0) {
-      // Preserve any client-side calls that legacy DB might not support (>25)
+    } else if (snapshot.called_numbers) {
+      // Merge server called numbers with locally confirmed calls using Map deduplication
       setCalledNumbers(prev => {
-        const merged = [...snapshot.called_numbers];
+        const callMap = new Map<number, CalledNumber>();
         for (const c of prev) {
-          if (!merged.some(m => m.number === c.number)) {
-            merged.push(c);
-          }
+          callMap.set(c.number, c);
         }
-        return merged.sort((a, b) => a.sequence - b.sequence);
+        for (const c of snapshot.called_numbers) {
+          callMap.set(c.number, c);
+        }
+        return Array.from(callMap.values()).sort((a, b) => a.sequence - b.sequence);
       });
     }
 
@@ -255,34 +272,46 @@ export function useBingoGame(initialRoomCode?: string) {
     if (event === 'NUMBER_CALLED') {
       const call = data as unknown as CallNumberResult;
       sounds.playMatch();
-      setOptimisticCalled(null);
 
+      const newCall: CalledNumber = {
+        id: 'call_' + call.sequence,
+        number: call.number,
+        called_by: call.called_by,
+        sequence: call.sequence,
+        called_at: new Date().toISOString(),
+      };
+
+      // Immediately fold into authoritative called numbers
       setCalledNumbers(prev => {
-        if (prev.some(c => c.number === call.number)) return prev;
-        return [
-          ...prev,
-          {
-            id: 'call_' + call.sequence,
-            number: call.number,
-            called_by: call.called_by,
-            sequence: call.sequence,
-            called_at: new Date().toISOString(),
-          },
-        ];
+        if (prev.some(c => c.number === newCall.number)) return prev;
+        return [...prev, newCall];
       });
+
+      // Clear optimistic call now that authoritative state has folded it
+      setOptimisticCalled(null);
 
       setP1(prev => prev ? { ...prev, lines_completed: call.p1_lines } : null);
       setP2(prev => prev ? { ...prev, lines_completed: call.p2_lines } : null);
+
+      // Strict turn alternation: determine next turn ID
+      const p1IdVal = p1Ref.current?.id;
+      const p2IdVal = p2Ref.current?.id;
+      const oppositePlayerId = call.called_by === p1IdVal ? p2IdVal : p1IdVal;
+      const nextTurnId = call.is_game_over
+        ? null
+        : (call.next_turn_player_id || oppositePlayerId || null);
 
       setGame(prev => {
         if (!prev) return null;
         return {
           ...prev,
           status: call.is_game_over ? 'completed' : prev.status,
-          current_turn_player_id: call.next_turn_player_id,
+          current_turn_player_id: nextTurnId,
           winner_id: call.winner_id,
         };
       });
+
+      console.log(`[BingoDuel:Turn] NUMBER_CALLED event: called=#${call.number} by ${call.called_by}. Next turn: ${nextTurnId}`);
 
       if (call.is_game_over) {
         sounds.playVictory();
@@ -1010,7 +1039,7 @@ export function useBingoGame(initialRoomCode?: string) {
     }
   }, [game?.id, game?.board_size, getSession, opponent?.id, player?.id, player?.player_number, syncGameState]);
 
-  // ACTION: Call Number (Supabase Server-Side Strict Alternating Turns & Client Fallback)
+  // ACTION: Call Number (Strict Alternating Turns & Authoritative State Folding)
   const callNumber = useCallback(async (number: number) => {
     if (!game?.id || !isMyTurn) return;
     if (calledNumbers.some(c => c.number === number)) return;
@@ -1033,67 +1062,78 @@ export function useBingoGame(initialRoomCode?: string) {
         p_number: number,
       });
 
-      let result: CallNumberResult;
-
       if (error) {
-        // Fallback: If DB rejected call (e.g. number > 25 on unmigrated DB), compute line validation locally
-        const nextAllCalled = [...calledNumbers.map(c => c.number), number];
-        const nextSeq = (calledNumbers.length > 0 ? Math.max(...calledNumbers.map(c => c.sequence)) : 0) + 1;
-
-        const myBoard = player?.board || [];
-        const oppBoard = opponent?.board || [];
-
-        const myLinesRes = calculateLines(myBoard, nextAllCalled, boardSize);
-        const oppLinesRes = calculateLines(oppBoard, nextAllCalled, boardSize);
-
-        const myWin = myLinesRes.completedLines.length >= targetLines;
-        const oppWin = oppLinesRes.completedLines.length >= targetLines;
-        const isGameOver = myWin || oppWin;
-        const winnerId = myWin ? player?.id || null : (oppWin ? opponent?.id || null : null);
-        const nextTurnId = isGameOver ? null : (opponent?.id || null);
-
-        const p1LinesCount = isHost ? myLinesRes.completedLines.length : oppLinesRes.completedLines.length;
-        const p2LinesCount = isHost ? oppLinesRes.completedLines.length : myLinesRes.completedLines.length;
-
-        result = {
-          success: true,
-          number,
-          sequence: nextSeq,
-          called_by: player?.id || sessionId,
-          next_turn_player_id: nextTurnId,
-          winner_id: winnerId,
-          is_game_over: isGameOver,
-          p1_lines: p1LinesCount,
-          p2_lines: p2LinesCount,
-          all_called_count: nextAllCalled.length,
-        };
-      } else {
-        result = data as CallNumberResult;
+        console.error('[BingoDuel:Turn] Server rejected call_number:', error);
+        throw new Error(error.message || 'Call was rejected by the server');
       }
 
-      // 1. Immediately apply local state
-      handleRealtimeEvent('NUMBER_CALLED', result);
+      const result = data as CallNumberResult;
 
-      // 2. Broadcast to opponent instantly via Supabase Realtime
+      // 2. Immediately fold confirmed call into authoritative calledNumbers state
+      const confirmedCall: CalledNumber = {
+        id: 'call_' + result.sequence,
+        number: result.number,
+        called_by: result.called_by,
+        sequence: result.sequence,
+        called_at: new Date().toISOString(),
+      };
+
+      setCalledNumbers(prev => {
+        if (prev.some(c => c.number === confirmedCall.number)) return prev;
+        return [...prev, confirmedCall];
+      });
+
+      // 3. Clear optimistic call now that authoritative state has folded it in
+      setOptimisticCalled(null);
+
+      // 4. Strict turn alternation: determine next turn ID
+      const p1IdVal = p1?.id;
+      const p2IdVal = p2?.id;
+      const oppositePlayerId = result.called_by === p1IdVal ? p2IdVal : p1IdVal;
+      const nextTurnId = result.is_game_over
+        ? null
+        : (result.next_turn_player_id || oppositePlayerId || null);
+
+      setP1(prev => prev ? { ...prev, lines_completed: result.p1_lines } : null);
+      setP2(prev => prev ? { ...prev, lines_completed: result.p2_lines } : null);
+
+      setGame(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          status: result.is_game_over ? 'completed' : prev.status,
+          current_turn_player_id: nextTurnId,
+          winner_id: result.winner_id,
+        };
+      });
+
+      console.log(`[BingoDuel:Turn] Call confirmed: #${result.number} by ${result.called_by}. Next turn: ${nextTurnId}`);
+
+      if (result.is_game_over) {
+        sounds.playVictory();
+      }
+
+      // 5. Broadcast to opponent instantly via Supabase Realtime
       if (channelRef.current) {
         channelRef.current.send({
           type: 'broadcast',
           event: 'NUMBER_CALLED',
-          payload: result,
+          payload: {
+            ...result,
+            next_turn_player_id: nextTurnId,
+          },
         }).catch(() => {});
       }
 
-      // 3. Fast sync in background if server call succeeded
-      if (!error) {
-        syncGameState(game.id).catch(() => {});
-      }
+      // 6. Fast sync in background
+      syncGameState(game.id).catch(() => {});
     } catch (err: unknown) {
       setOptimisticCalled(null);
       const msg = (err as Error).message || 'Call rejected';
       setError(msg);
       sounds.playAlert();
     }
-  }, [boardSize, calledNumbers, game?.id, getSession, handleRealtimeEvent, isHost, isMyTurn, opponent?.board, opponent?.id, player?.board, player?.id, syncGameState, targetLines]);
+  }, [calledNumbers, game?.id, getSession, isMyTurn, p1?.id, p2?.id, syncGameState]);
 
   // ACTION: Claim Timeout Win
   const claimTimeoutWin = useCallback(async () => {

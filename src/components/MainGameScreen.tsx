@@ -169,12 +169,19 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
     setSelectedNumber(num);
   }, []);
 
-  // Set of all called numbers including optimistic call
+  // Authoritative Set of called numbers from single source of truth
+  const authoritativeCalledSet = useMemo(() => {
+    return new Set(calledNumbers.map(c => c.number));
+  }, [calledNumbers]);
+
+  // Unified cell marking set: authoritative calls are permanent; optimistic call layers on top
   const calledNumbersSet = useMemo(() => {
-    const set = new Set(calledNumbers.map(c => c.number));
-    if (optimisticCalled) set.add(optimisticCalled);
+    const set = new Set(authoritativeCalledSet);
+    if (optimisticCalled !== null && optimisticCalled !== undefined) {
+      set.add(optimisticCalled);
+    }
     return set;
-  }, [calledNumbers, optimisticCalled]);
+  }, [authoritativeCalledSet, optimisticCalled]);
 
   // Calculate completed lines on player's board
   const { completedLines } = useMemo(() => {
@@ -209,9 +216,11 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
     if (!isMyTurn || selectedNumber === null || isCalling || loading) return;
     if (calledNumbersSet.has(selectedNumber)) return;
 
+    const numToCall = selectedNumber;
     setIsCalling(true);
     try {
-      await onCallNumber(selectedNumber);
+      await onCallNumber(numToCall);
+      setSelectedNumber(null);
     } finally {
       setIsCalling(false);
     }

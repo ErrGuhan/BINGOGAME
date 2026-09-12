@@ -120,7 +120,7 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
     } else {
       // Only assign if we still have numbers left in sequence
       if (nextNumber > totalCells) return;
-      sounds.playDraft(440 + (nextNumber % 25) * 18);
+      sounds.playDraft(440 + (nextNumber % (boardSize === 10 ? 50 : 25)) * 14);
       const nextBoard = [...board];
       nextBoard[idx] = nextNumber;
       setBoard(nextBoard);
