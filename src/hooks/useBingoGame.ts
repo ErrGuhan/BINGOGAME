@@ -1056,7 +1056,12 @@ export function useBingoGame(initialRoomCode?: string) {
         throw new Error('Supabase is not configured. Please check your environment variables in .env.local.');
       }
 
-      const { data, error } = await supabase.rpc('call_number', {
+      console.log(`[BingoDuel:Turn] Calling number #${number} in game ${game.id}...`);
+
+      let rpcData: any = null;
+
+      // 1. Attempt modern 5-parameter call_number (with player_id for leaderboard tracking)
+      const primaryRes = await supabase.rpc('call_number', {
         p_game_id: game.id,
         p_session_id: sessionId,
         p_number: number,
@@ -1069,12 +1074,36 @@ export function useBingoGame(initialRoomCode?: string) {
         p_opponent_player_id: null,
       });
 
-      if (error) {
-        console.error('[BingoDuel:Turn] Server rejected call_number:', error);
-        throw new Error(error.message || 'Call was rejected by the server');
+      if (primaryRes.error) {
+        const isSignatureMismatch =
+          primaryRes.error.code === 'PGRST202' ||
+          primaryRes.error.code === '42883' ||
+          primaryRes.error.message?.toLowerCase().includes('schema cache') ||
+          primaryRes.error.message?.toLowerCase().includes('could not find the function') ||
+          primaryRes.error.message?.toLowerCase().includes('call_number');
+
+        if (isSignatureMismatch) {
+          console.warn('[BingoDuel:Turn] Unmigrated Supabase database detected (missing 5-param call_number). Retrying with legacy 3-param signature...');
+          const legacyRes = await supabase.rpc('call_number', {
+            p_game_id: game.id,
+            p_session_id: sessionId,
+            p_number: number,
+          });
+
+          if (legacyRes.error) {
+            console.error('[BingoDuel:Turn] Legacy call_number failed:', legacyRes.error);
+            throw new Error(legacyRes.error.message || 'Call was rejected by the server');
+          }
+          rpcData = legacyRes.data;
+        } else {
+          console.error('[BingoDuel:Turn] Server rejected call_number:', primaryRes.error);
+          throw new Error(primaryRes.error.message || 'Call was rejected by the server');
+        }
+      } else {
+        rpcData = primaryRes.data;
       }
 
-      const result = data as CallNumberResult;
+      const result = rpcData as CallNumberResult;
 
       // 2. Immediately fold confirmed call into authoritative calledNumbers state
       const confirmedCall: CalledNumber = {
@@ -1139,6 +1168,7 @@ export function useBingoGame(initialRoomCode?: string) {
       const msg = (err as Error).message || 'Call rejected';
       setError(msg);
       sounds.playAlert();
+      throw err; // Re-throw so caller UI (handleExecuteCall) knows the call failed
     }
   }, [calledNumbers, game?.id, getSession, isMyTurn, p1?.id, p2?.id, syncGameState]);
 
@@ -1149,15 +1179,41 @@ export function useBingoGame(initialRoomCode?: string) {
       const supabase = getSupabase();
       if (!supabase || !isSupabaseConfigured()) return;
 
-      const { data, error } = await supabase.rpc('claim_timeout_win', {
+      let rpcData: any = null;
+
+      // 1. Attempt modern 4-parameter claim_timeout_win (with player_id for leaderboard tracking)
+      const primaryRes = await supabase.rpc('claim_timeout_win', {
         p_game_id: game.id,
         p_session_id: getSession(),
-        // Stable player_id for leaderboard attribution
         p_player_id: getPlayerId(),
-        p_opponent_player_id: null,  // Opponent's localStorage player_id is unknown server-side
+        p_opponent_player_id: null,
       });
-      if (error) throw error;
-      handleRealtimeEvent('TIMEOUT_WIN_CLAIMED', data);
+
+      if (primaryRes.error) {
+        const isSignatureMismatch =
+          primaryRes.error.code === 'PGRST202' ||
+          primaryRes.error.code === '42883' ||
+          primaryRes.error.message?.toLowerCase().includes('schema cache') ||
+          primaryRes.error.message?.toLowerCase().includes('could not find the function') ||
+          primaryRes.error.message?.toLowerCase().includes('claim_timeout_win');
+
+        if (isSignatureMismatch) {
+          console.warn('[BingoDuel:Turn] Retrying claim_timeout_win with legacy 2-param signature...');
+          const legacyRes = await supabase.rpc('claim_timeout_win', {
+            p_game_id: game.id,
+            p_session_id: getSession(),
+          });
+
+          if (legacyRes.error) throw legacyRes.error;
+          rpcData = legacyRes.data;
+        } else {
+          throw primaryRes.error;
+        }
+      } else {
+        rpcData = primaryRes.data;
+      }
+
+      handleRealtimeEvent('TIMEOUT_WIN_CLAIMED', rpcData);
     } catch (err: unknown) {
       console.error('Failed to claim timeout:', err);
     }

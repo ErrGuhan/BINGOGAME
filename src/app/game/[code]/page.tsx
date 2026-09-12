@@ -159,6 +159,7 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
             onCallNumber={callNumber}
             loading={loading}
             optimisticCalled={optimisticCalled}
+            errorMessage={error}
           />
         )}
 

@@ -296,6 +296,7 @@ export default function App() {
               onCallNumber={callNumber}
               loading={loading}
               optimisticCalled={optimisticCalled}
+              errorMessage={error}
             />
           ) : (
             <div className="flex flex-col items-center justify-center p-12 text-center">

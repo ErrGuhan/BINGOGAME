@@ -29,7 +29,7 @@ const BingoGridCell = React.memo(function BingoGridCell({
   isMarked,
   isWinningCell,
   isSelected,
-  isMyTurn,
+  isMyTurn: _isMyTurn,
   boardSize,
   onSelect,
 }: BingoGridCellProps) {
@@ -40,24 +40,24 @@ const BingoGridCell = React.memo(function BingoGridCell({
       type="button"
       onClick={() => {
         sounds.playTap();
-        if (!isMarked && isMyTurn) {
+        if (!isMarked) {
           onSelect(num);
         }
       }}
-      className={`aspect-square flex flex-col items-center justify-center relative transition-all ${
+      className={`aspect-square flex flex-col items-center justify-center relative transition-all cursor-pointer touch-manipulation ${
         is10 ? 'rounded-md p-0' : 'rounded-xl'
       } ${
         isWinningCell
           ? 'bg-primary-container text-on-primary-container shadow-xs border border-primary-container scale-[1.02] z-10'
           : isMarked
-          ? 'bg-primary-container/10 text-primary-container border border-primary-container/20'
+          ? 'bg-primary-container/10 text-primary-container border border-primary-container/20 cursor-default'
           : isSelected
           ? 'bg-surface-bright text-on-surface border-2 border-primary-container shadow-xs scale-[1.02] z-10'
           : 'bg-surface-container-high text-on-surface hover:bg-surface-container-highest active:scale-95 shadow-xs border border-outline-variant'
       }`}
     >
       <span
-        className={`font-bold ${
+        className={`font-bold pointer-events-none select-none ${
           is10
             ? 'text-[10px] sm:text-xs leading-none'
             : 'font-label-tile-mobile text-label-tile-mobile'
@@ -67,13 +67,13 @@ const BingoGridCell = React.memo(function BingoGridCell({
       </span>
       {isWinningCell ? (
         <CheckIcon
-          className={`absolute text-on-primary-container ${
+          className={`absolute text-on-primary-container pointer-events-none ${
             is10 ? 'w-2 h-2 bottom-0.5 right-0.5' : 'w-3.5 h-3.5 bottom-0.5 right-1'
           }`}
         />
       ) : isMarked ? (
         <CheckIcon
-          className={`absolute text-primary-container ${
+          className={`absolute text-primary-container pointer-events-none ${
             is10 ? 'w-2 h-2 bottom-0.5 right-0.5' : 'w-3.5 h-3.5 bottom-0.5 right-1'
           }`}
         />
@@ -132,6 +132,7 @@ interface MainGameScreenProps {
   optimisticCalled?: number | null;
   boardSize?: BoardSize;
   targetLines?: number;
+  errorMessage?: string | null;
 }
 
 const HEADERS_5 = ['B', 'I', 'N', 'G', 'O'];
@@ -156,9 +157,11 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
   optimisticCalled,
   boardSize = 5,
   targetLines = 5,
+  errorMessage,
 }) => {
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
   const [isCalling, setIsCalling] = useState<boolean>(false);
+  const [localCallError, setLocalCallError] = useState<string | null>(null);
   const [showNumberPad, setShowNumberPad] = useState<boolean>(false);
   const [callerTrayRangeIndex, setCallerTrayRangeIndex] = useState<number>(0);
   // Auto-dismiss completion banner
@@ -166,9 +169,15 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
   const prevLinesRef = useRef<number>(0);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Reset selection to null at the start of every turn
+  // Resilient selection reset: ONLY clear selection when our turn actually ends
+  // (transitions from true to false). This prevents premature wipes during polling updates.
+  const prevIsMyTurnRef = useRef<boolean>(isMyTurn);
   useEffect(() => {
-    setSelectedNumber(null);
+    if (prevIsMyTurnRef.current && !isMyTurn) {
+      setSelectedNumber(null);
+      setLocalCallError(null);
+    }
+    prevIsMyTurnRef.current = isMyTurn;
   }, [isMyTurn]);
 
   const totalNumbers = boardSize * boardSize;
@@ -179,6 +188,7 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
 
   const handleSelectNumber = useCallback((num: number) => {
     setSelectedNumber(num);
+    setLocalCallError(null);
   }, []);
 
   // Authoritative Set of called numbers from single source of truth
@@ -218,16 +228,28 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
     };
   }, [completedLines.length]);
 
-  // Handle number call submission
+  // Handle number call submission with safety timeout and retry preservation
   const handleExecuteCall = useCallback(async () => {
     if (!isMyTurn || selectedNumber === null || isCalling || loading) return;
     if (calledNumbersSet.has(selectedNumber)) return;
 
     const numToCall = selectedNumber;
     setIsCalling(true);
+    setLocalCallError(null);
+
+    // 8-second safety timeout ensures button never gets stuck on "Calling..." if network hangs
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Couldn't reach server. Tap to retry.")), 8000)
+    );
+
     try {
-      await onCallNumber(numToCall);
+      await Promise.race([onCallNumber(numToCall), timeoutPromise]);
       setSelectedNumber(null);
+    } catch (err: unknown) {
+      const msg = (err as Error).message || "Couldn't call number, tap to retry";
+      console.error('[MainGameScreen] Call failed:', msg);
+      setLocalCallError(msg);
+      // Keep selectedNumber intact so player can immediately tap again to retry
     } finally {
       setIsCalling(false);
     }
@@ -244,8 +266,29 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
     return Array.from({ length: r.end - r.start + 1 }, (_, i) => r.start + i);
   }, [boardSize, allNumbers, callerTrayRangeIndex]);
 
+  const activeError = localCallError || errorMessage;
+
   return (
     <div className="flex flex-col w-full max-w-md mx-auto space-y-2 select-none pb-6 pt-1">
+      {/* Dynamic Error / Alert Banner */}
+      {activeError && (
+        <div className="w-full px-3 py-2 rounded-xl bg-error-container text-on-error-container text-xs font-semibold flex items-center justify-between gap-2 border border-error/20 animate-fadeIn">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="shrink-0 font-bold">⚠️</span>
+            <span className="truncate">{activeError}</span>
+          </div>
+          {localCallError && (
+            <button
+              type="button"
+              onClick={() => setLocalCallError(null)}
+              className="text-[10px] uppercase font-bold text-on-error-container/70 hover:text-on-error-container shrink-0 cursor-pointer"
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
+
       {/* 1. Unified Scoreboard & Turn HUD */}
       <section className="w-full">
         <div className="w-full bg-surface-container/80 backdrop-blur-xl rounded-2xl p-2.5 shadow-xs border border-outline-variant flex items-center justify-between">
@@ -363,7 +406,7 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
 
       {/* 3. Hero Bingo Matrix */}
       <section className="w-full relative">
-        <div className="w-full aspect-square bg-surface-container/80 backdrop-blur-xl rounded-2xl p-2 sm:p-2.5 shadow-xs border border-outline-variant relative overflow-hidden flex flex-col justify-between">
+        <div className="w-full aspect-square bg-surface-container/80 backdrop-blur-xl rounded-2xl p-2 sm:p-2.5 shadow-xs border border-outline-variant relative flex flex-col justify-between">
           {/* Winning Line Overlay Banner — auto-dismisses after 800ms */}
           {showCompletionBanner && (
             <div className="absolute inset-0 pointer-events-none z-20 flex items-center justify-center">
@@ -405,7 +448,9 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
           {/* Grid Board */}
           <div
             className={`grid w-full h-full relative z-10 ${
-              boardSize === 10 ? 'grid-cols-10 gap-1' : 'grid-cols-5 gap-1.5'
+              boardSize === 10
+                ? 'grid-cols-10 grid-rows-10 gap-1'
+                : 'grid-cols-5 grid-rows-5 gap-1.5'
             }`}
             id="bingo-board"
           >
