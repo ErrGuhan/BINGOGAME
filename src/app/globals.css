@@ -1,65 +1,182 @@
 @import "tailwindcss";
 
 :root {
-  --font-outfit: 'Outfit', sans-serif;
-  --font-jakarta: 'Plus Jakarta Sans', sans-serif;
+  --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
 
-  /* Stitch Theme Colors */
-  --surface: #0f1222;
-  --surface-dim: #0f1222;
-  --surface-bright: #35384a;
-  --surface-container-lowest: #0a0d1d;
-  --surface-container-low: #181b2b;
-  --surface-container: #1c1f2f;
-  --surface-container-high: #26293a;
-  --surface-container-highest: #313445;
-  --on-surface: #e0e1f8;
-  --on-surface-variant: #b9cac4;
-  --inverse-surface: #e0e1f8;
-  --inverse-on-surface: #2d2f41;
-  --outline: #83948f;
-  --outline-variant: #3a4a46;
-  --surface-tint: #00dfc1;
+  /* Apple Light Mode Palette */
+  --surface: #FFFFFF;
+  --surface-dim: #F5F5F7;
+  --surface-bright: #FFFFFF;
+  --surface-container-lowest: #F5F5F7;
+  --surface-container-low: #F2F2F4;
+  --surface-container: #EBEBED;
+  --surface-container-high: #E5E5EA;
+  --surface-container-highest: #D8D8DC;
+  --on-surface: #1C1C1E;
+  --on-surface-variant: #6E6E73;
+  --inverse-surface: #1C1C1E;
+  --inverse-on-surface: #F5F5F7;
+  --outline: #AEAEB2;
+  --outline-variant: #E5E5EA;
+  --surface-tint: #007AFF;
 
-  --primary: #d7fff3;
-  --on-primary: #00382f;
-  --primary-container: #00f5d4;
-  --on-primary-container: #006c5c;
-  --inverse-primary: #006b5b;
+  --primary: #E5F2FF;
+  --on-primary: #007AFF;
+  --primary-container: #007AFF;
+  --on-primary-container: #FFFFFF;
+  --inverse-primary: #0A84FF;
 
-  --secondary: #ddb7ff;
-  --on-secondary: #490080;
-  --secondary-container: #6f00be;
-  --on-secondary-container: #d6a9ff;
+  --secondary: #E8F9ED;
+  --on-secondary: #34C759;
+  --secondary-container: #34C759;
+  --on-secondary-container: #FFFFFF;
 
-  --tertiary: #fff6ea;
-  --on-tertiary: #402d00;
-  --tertiary-container: #ffd57d;
-  --on-tertiary-container: #7a5a00;
+  --tertiary: #FFF8EB;
+  --on-tertiary: #FF9F0A;
+  --tertiary-container: #FF9F0A;
+  --on-tertiary-container: #FFFFFF;
 
-  --error: #ffb4ab;
-  --on-error: #690005;
-  --error-container: #93000a;
-  --on-error-container: #ffdad6;
+  --error: #FF3B30;
+  --on-error: #FFFFFF;
+  --error-container: #FFE5E3;
+  --on-error-container: #FF3B30;
 
-  --primary-fixed: #26fedc;
-  --primary-fixed-dim: #00dfc1;
-  --on-primary-fixed: #00201a;
-  --on-primary-fixed-variant: #005144;
+  --primary-fixed: #007AFF;
+  --primary-fixed-dim: #0062CC;
+  --on-primary-fixed: #FFFFFF;
+  --on-primary-fixed-variant: #0051B3;
 
-  --secondary-fixed: #f0dbff;
-  --secondary-fixed-dim: #ddb7ff;
-  --on-secondary-fixed: #2c0051;
-  --on-secondary-fixed-variant: #6900b3;
+  --secondary-fixed: #34C759;
+  --secondary-fixed-dim: #28A745;
+  --on-secondary-fixed: #FFFFFF;
+  --on-secondary-fixed-variant: #1E7E34;
 
-  --tertiary-fixed: #ffdf9f;
-  --tertiary-fixed-dim: #f9bd22;
-  --on-tertiary-fixed: #261a00;
-  --on-tertiary-fixed-variant: #5c4300;
+  --tertiary-fixed: #FF9F0A;
+  --tertiary-fixed-dim: #E08A00;
+  --on-tertiary-fixed: #FFFFFF;
+  --on-tertiary-fixed-variant: #B36B00;
 
-  --background: #0f1222;
-  --on-background: #e0e1f8;
-  --surface-variant: #313445;
+  --background: #F5F5F7;
+  --on-background: #1C1C1E;
+  --surface-variant: #E5E5EA;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #000000;
+    --surface-dim: #1C1C1E;
+    --surface-bright: #2C2C2E;
+    --surface-container-lowest: #000000;
+    --surface-container-low: #1C1C1E;
+    --surface-container: #2C2C2E;
+    --surface-container-high: #3A3A3C;
+    --surface-container-highest: #48484A;
+    --on-surface: #FFFFFF;
+    --on-surface-variant: #AEAEB2;
+    --inverse-surface: #F5F5F7;
+    --inverse-on-surface: #1C1C1E;
+    --outline: #636366;
+    --outline-variant: #3A3A3C;
+    --surface-tint: #0A84FF;
+
+    --primary: #0A84FF;
+    --on-primary: #FFFFFF;
+    --primary-container: #0A84FF;
+    --on-primary-container: #FFFFFF;
+    --inverse-primary: #007AFF;
+
+    --secondary: #30D158;
+    --on-secondary: #000000;
+    --secondary-container: #30D158;
+    --on-secondary-container: #FFFFFF;
+
+    --tertiary: #FFD60A;
+    --on-tertiary: #000000;
+    --tertiary-container: #FFD60A;
+    --on-tertiary-container: #000000;
+
+    --error: #FF453A;
+    --on-error: #FFFFFF;
+    --error-container: #3B1613;
+    --on-error-container: #FF453A;
+
+    --primary-fixed: #0A84FF;
+    --primary-fixed-dim: #007AFF;
+    --on-primary-fixed: #FFFFFF;
+    --on-primary-fixed-variant: #0051B3;
+
+    --secondary-fixed: #30D158;
+    --secondary-fixed-dim: #28A745;
+    --on-secondary-fixed: #000000;
+    --on-secondary-fixed-variant: #1E7E34;
+
+    --tertiary-fixed: #FFD60A;
+    --tertiary-fixed-dim: #E08A00;
+    --on-tertiary-fixed: #000000;
+    --on-tertiary-fixed-variant: #B36B00;
+
+    --background: #000000;
+    --on-background: #FFFFFF;
+    --surface-variant: #3A3A3C;
+  }
+}
+
+:root.dark {
+  --surface: #000000;
+  --surface-dim: #1C1C1E;
+  --surface-bright: #2C2C2E;
+  --surface-container-lowest: #000000;
+  --surface-container-low: #1C1C1E;
+  --surface-container: #2C2C2E;
+  --surface-container-high: #3A3A3C;
+  --surface-container-highest: #48484A;
+  --on-surface: #FFFFFF;
+  --on-surface-variant: #AEAEB2;
+  --inverse-surface: #F5F5F7;
+  --inverse-on-surface: #1C1C1E;
+  --outline: #636366;
+  --outline-variant: #3A3A3C;
+  --surface-tint: #0A84FF;
+
+  --primary: #0A84FF;
+  --on-primary: #FFFFFF;
+  --primary-container: #0A84FF;
+  --on-primary-container: #FFFFFF;
+  --inverse-primary: #007AFF;
+
+  --secondary: #30D158;
+  --on-secondary: #000000;
+  --secondary-container: #30D158;
+  --on-secondary-container: #FFFFFF;
+
+  --tertiary: #FFD60A;
+  --on-tertiary: #000000;
+  --tertiary-container: #FFD60A;
+  --on-tertiary-container: #000000;
+
+  --error: #FF453A;
+  --on-error: #FFFFFF;
+  --error-container: #3B1613;
+  --on-error-container: #FF453A;
+
+  --primary-fixed: #0A84FF;
+  --primary-fixed-dim: #007AFF;
+  --on-primary-fixed: #FFFFFF;
+  --on-primary-fixed-variant: #0051B3;
+
+  --secondary-fixed: #30D158;
+  --secondary-fixed-dim: #28A745;
+  --on-secondary-fixed: #000000;
+  --on-secondary-fixed-variant: #1E7E34;
+
+  --tertiary-fixed: #FFD60A;
+  --tertiary-fixed-dim: #E08A00;
+  --on-tertiary-fixed: #000000;
+  --on-tertiary-fixed-variant: #B36B00;
+
+  --background: #000000;
+  --on-background: #FFFFFF;
+  --surface-variant: #3A3A3C;
 }
 
 @theme {
@@ -138,9 +255,9 @@ html, body {
   min-height: 100dvh;
   margin: 0;
   padding: 0;
-  background-color: #0f1222;
-  color: #e0e1f8;
-  font-family: var(--font-jakarta), system-ui, sans-serif;
+  background-color: var(--surface-dim);
+  color: var(--on-surface);
+  font-family: var(--font-inter), system-ui, sans-serif;
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
 }
@@ -157,132 +274,148 @@ html, body {
   display: none;
 }
 
-/* Typography tokens matching Stitch */
+/* Typography tokens - Apple HIG refinement with Inter */
 .font-headline-xl {
-  font-family: var(--font-outfit), sans-serif;
-  font-size: 40px;
-  line-height: 48px;
-  letter-spacing: -0.02em;
-  font-weight: 800;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 38px;
+  line-height: 44px;
+  letter-spacing: -0.025em;
+  font-weight: 700;
 }
 
 .font-headline-xl-mobile {
-  font-family: var(--font-outfit), sans-serif;
-  font-size: 32px;
-  line-height: 40px;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 30px;
+  line-height: 36px;
   letter-spacing: -0.02em;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .font-headline-lg {
-  font-family: var(--font-outfit), sans-serif;
-  font-size: 32px;
-  line-height: 40px;
-  letter-spacing: -0.01em;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 28px;
+  line-height: 34px;
+  letter-spacing: -0.015em;
   font-weight: 700;
 }
 
 .font-headline-lg-mobile {
-  font-family: var(--font-outfit), sans-serif;
-  font-size: 26px;
-  line-height: 32px;
-  letter-spacing: -0.01em;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 24px;
+  line-height: 30px;
+  letter-spacing: -0.015em;
   font-weight: 700;
 }
 
 .font-headline-md {
-  font-family: var(--font-outfit), sans-serif;
-  font-size: 22px;
-  line-height: 28px;
-  font-weight: 700;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 20px;
+  line-height: 26px;
+  letter-spacing: -0.01em;
+  font-weight: 600;
 }
 
 .font-headline-sm {
-  font-family: var(--font-outfit), sans-serif;
-  font-size: 18px;
-  line-height: 24px;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 17px;
+  line-height: 22px;
+  letter-spacing: -0.005em;
   font-weight: 600;
 }
 
 .font-body-lg {
-  font-family: var(--font-jakarta), sans-serif;
+  font-family: var(--font-inter), system-ui, sans-serif;
   font-size: 16px;
   line-height: 24px;
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .font-body-md {
-  font-family: var(--font-jakarta), sans-serif;
+  font-family: var(--font-inter), system-ui, sans-serif;
   font-size: 14px;
   line-height: 20px;
   font-weight: 400;
 }
 
 .font-body-sm {
-  font-family: var(--font-jakarta), sans-serif;
+  font-family: var(--font-inter), system-ui, sans-serif;
   font-size: 12px;
   line-height: 16px;
   font-weight: 400;
 }
 
 .font-label-tile {
-  font-family: var(--font-outfit), sans-serif;
-  font-size: 24px;
-  line-height: 28px;
-  letter-spacing: -0.01em;
-  font-weight: 800;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 22px;
+  line-height: 26px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
 .font-label-tile-mobile {
-  font-family: var(--font-outfit), sans-serif;
-  font-size: 20px;
-  line-height: 24px;
-  letter-spacing: -0.01em;
-  font-weight: 800;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 18px;
+  line-height: 22px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
 .font-label-lg {
-  font-family: var(--font-outfit), sans-serif;
+  font-family: var(--font-inter), system-ui, sans-serif;
   font-size: 15px;
   line-height: 20px;
-  letter-spacing: 0.02em;
+  letter-spacing: -0.01em;
   font-weight: 600;
 }
 
 .font-label-md {
-  font-family: var(--font-outfit), sans-serif;
+  font-family: var(--font-inter), system-ui, sans-serif;
   font-size: 13px;
   line-height: 18px;
-  letter-spacing: 0.04em;
-  font-weight: 600;
+  letter-spacing: -0.005em;
+  font-weight: 500;
 }
 
 .font-label-sm {
-  font-family: var(--font-outfit), sans-serif;
+  font-family: var(--font-inter), system-ui, sans-serif;
   font-size: 11px;
   line-height: 14px;
-  letter-spacing: 0.06em;
-  font-weight: 700;
+  letter-spacing: 0.01em;
+  font-weight: 600;
 }
 
-/* Material Symbols alignment */
+/* Material Symbols fallback */
 .material-symbols-outlined {
-  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 20;
   vertical-align: middle;
 }
 
-/* Pulsing Glow Animation */
-@keyframes pulseGlow {
+/* Subtle Apple fade-in animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 150ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Fallback for pulse-glow to avoid any runtime errors, styled as subtle Apple pulse */
+@keyframes subtlePulse {
   0%, 100% {
-    box-shadow: 0 0 15px rgba(0, 245, 212, 0.4);
+    opacity: 1;
   }
   50% {
-    box-shadow: 0 0 28px rgba(0, 245, 212, 0.8);
+    opacity: 0.85;
   }
 }
 
 .animate-pulse-glow {
-  animation: pulseGlow 2s infinite ease-in-out;
+  animation: subtlePulse 2s ease-in-out infinite;
 }

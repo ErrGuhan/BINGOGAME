@@ -30,10 +30,10 @@ export function UpdateToast() {
       aria-label="Application update available"
       className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-md animate-in fade-in slide-in-from-top duration-300 pointer-events-auto"
     >
-      <div className="flex items-center justify-between gap-3 p-3.5 sm:p-4 rounded-2xl bg-[#151928]/95 backdrop-blur-xl border border-primary-container/40 shadow-2xl shadow-primary-container/10">
+      <div className="flex items-center justify-between gap-3 p-3.5 sm:p-4 rounded-2xl bg-surface-container/95 backdrop-blur-xl border border-outline-variant shadow-lg">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="flex-shrink-0 w-8 h-8 rounded-xl bg-primary-container/20 flex items-center justify-center text-primary-container">
-            <Sparkles className="w-4 h-4 animate-pulse" />
+          <div className="flex-shrink-0 w-8 h-8 rounded-xl bg-surface-container-high border border-outline-variant flex items-center justify-center text-primary-container">
+            <Sparkles className="w-4 h-4" />
           </div>
           <div className="min-w-0">
             <p className="text-xs sm:text-sm font-semibold text-on-surface truncate">
@@ -49,7 +49,7 @@ export function UpdateToast() {
           <button
             type="button"
             onClick={confirmUpdate}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-primary-container text-black font-semibold text-xs transition-transform active:scale-95 hover:brightness-110 shadow-md shadow-primary-container/20"
+            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-primary-container text-on-primary-container font-semibold text-xs transition-transform active:scale-95 shadow-xs cursor-pointer"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Refresh</span>
@@ -58,7 +58,7 @@ export function UpdateToast() {
             type="button"
             onClick={() => setDismissed(true)}
             aria-label="Dismiss notification"
-            className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-variant/30 transition-colors"
+            className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>

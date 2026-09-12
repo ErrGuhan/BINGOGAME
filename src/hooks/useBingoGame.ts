@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Game, Player, CalledNumber, GameStateSnapshot, CallNumberResult, BoardSize } from '@/types/bingo';
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase';
-import { getSessionId, getPlayerName, setPlayerName, setActiveRoomCode, clearActiveRoomCode, calculateLines } from '@/lib/gameEngine';
+import { getSessionId, getPlayerName, setPlayerName, setActiveRoomCode, clearActiveRoomCode, calculateLines, getPlayerId } from '@/lib/gameEngine';
 import { sounds } from '@/components/AudioController';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -1060,6 +1060,13 @@ export function useBingoGame(initialRoomCode?: string) {
         p_game_id: game.id,
         p_session_id: sessionId,
         p_number: number,
+        // Pass our stable player_id for server-side leaderboard attribution.
+        // The opponent's player_id is unknown to us (it lives in their localStorage),
+        // so p_opponent_player_id is null here. The DB skips the null row gracefully.
+        // The caller always writes their OWN win; both players write their own
+        // matches_played through whichever RPC they themselves trigger.
+        p_player_id: getPlayerId(),
+        p_opponent_player_id: null,
       });
 
       if (error) {
@@ -1145,6 +1152,9 @@ export function useBingoGame(initialRoomCode?: string) {
       const { data, error } = await supabase.rpc('claim_timeout_win', {
         p_game_id: game.id,
         p_session_id: getSession(),
+        // Stable player_id for leaderboard attribution
+        p_player_id: getPlayerId(),
+        p_opponent_player_id: null,  // Opponent's localStorage player_id is unknown server-side
       });
       if (error) throw error;
       handleRealtimeEvent('TIMEOUT_WIN_CLAIMED', data);

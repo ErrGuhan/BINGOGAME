@@ -2,6 +2,11 @@
 
 import React, { useState } from 'react';
 import Image from 'next/image';
+import {
+  ArrowLeftIcon,
+  SpeakerWaveIcon,
+  SpeakerXMarkIcon,
+} from '@heroicons/react/24/outline';
 import { sounds } from './AudioController';
 
 interface HeaderProps {
@@ -22,10 +27,10 @@ export const Header: React.FC<HeaderProps> = ({
   const [isMuted, setIsMuted] = useState(false);
 
   const badgeColors = {
-    live: 'text-primary-container bg-surface-container-high/90',
-    match: 'text-secondary-fixed-dim bg-secondary-container/80',
-    create: 'text-primary-container bg-surface-container-high/90',
-    setup: 'text-secondary-fixed-dim bg-secondary-container/80',
+    live: 'text-primary-container bg-primary-container/10 border border-primary-container/20',
+    match: 'text-secondary-container bg-secondary-container/10 border border-secondary-container/20',
+    create: 'text-primary-container bg-primary-container/10 border border-primary-container/20',
+    setup: 'text-secondary-container bg-secondary-container/10 border border-secondary-container/20',
   }[badgeType];
 
   const handleToggleSound = () => {
@@ -37,36 +42,36 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="fixed top-0 inset-x-0 z-50 bg-surface-container-lowest/80 backdrop-blur-xl pt-safe shadow-[0_4px_24px_rgba(0,0,0,0.35)] border-b border-outline-variant/15">
+    <header className="fixed top-0 inset-x-0 z-50 bg-surface/80 backdrop-blur-md pt-safe border-b border-outline-variant">
       <div className="h-14 px-space-md flex items-center justify-between max-w-md mx-auto">
         <div className="flex items-center gap-space-sm">
           {showBack && onBack && (
             <button
               aria-label="Go Back"
-              className="w-9 h-9 flex items-center justify-center rounded-full bg-surface-container-high/70 text-on-surface hover:text-primary transition-all active:scale-95 border border-outline-variant/20"
+              className="w-8 h-8 flex items-center justify-center rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high transition-all active:scale-95 border border-outline-variant"
               onClick={() => {
                 sounds.playTap();
                 onBack();
               }}
             >
-              <span className="material-symbols-outlined text-[18px]">arrow_back</span>
+              <ArrowLeftIcon className="w-4 h-4 text-on-surface" />
             </button>
           )}
 
           <div className="flex items-center gap-2">
             <Image
               alt="BingoDuel Logo"
-              className="h-7 w-7 object-contain drop-shadow-[0_0_8px_rgba(0,245,212,0.5)]"
+              className="h-6 w-6 object-contain"
               src="/logo.svg"
-              width={28}
-              height={28}
+              width={24}
+              height={24}
               priority
             />
             <div className="flex items-center gap-2">
-              <span className="font-headline-sm text-sm text-on-surface tracking-tight font-black">
+              <span className="font-headline-sm text-sm text-on-surface tracking-tight font-bold">
                 BINGO
               </span>
-              <span className={`font-label-sm text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-extrabold ${badgeColors}`}>
+              <span className={`font-label-sm text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-semibold ${badgeColors}`}>
                 {badge}
               </span>
             </div>
@@ -76,16 +81,18 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-2">
           <button
             aria-label="Sound Toggle"
-            className={`w-9 h-9 flex items-center justify-center rounded-full transition-all active:scale-95 border ${
+            className={`w-8 h-8 flex items-center justify-center rounded-full transition-all active:scale-95 border border-outline-variant bg-surface-container ${
               isMuted
-                ? 'bg-surface-container-high text-on-surface-variant/50 border-outline-variant/20'
-                : 'bg-surface-container-high text-primary-container border-primary-container/30 shadow-[0_0_8px_rgba(0,245,212,0.2)]'
+                ? 'text-on-surface-variant/50'
+                : 'text-primary-container'
             }`}
             onClick={handleToggleSound}
           >
-            <span className="material-symbols-outlined text-[18px]">
-              {isMuted ? 'volume_off' : 'volume_up'}
-            </span>
+            {isMuted ? (
+              <SpeakerXMarkIcon className="w-4 h-4" />
+            ) : (
+              <SpeakerWaveIcon className="w-4 h-4" />
+            )}
           </button>
         </div>
       </div>

@@ -1,11 +1,20 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  ArrowLeftIcon,
+  PlusIcon,
+  SparklesIcon,
+  ArrowPathIcon,
+  TrashIcon,
+  LockClosedIcon,
+  CheckCircleIcon,
+  ExclamationCircleIcon,
+} from '@heroicons/react/24/outline';
 import { sounds } from './AudioController';
 import { BoardSize } from '@/types/bingo';
 
 // ─── Memoized board cell for BoardSetup ────────────────────────────────────────
-// Extracted so React.memo can bail out when a cell's props haven't changed.
 interface BoardSetupCellProps {
   idx: number;
   val: number | null;
@@ -32,13 +41,13 @@ const BoardSetupCell = React.memo(function BoardSetupCell({
         boardSize === 10 ? 'rounded-md' : 'rounded-xl'
       } ${
         isFilled
-          ? 'bg-surface-container-high/90 text-on-surface font-black shadow-sm border border-primary-container/30 hover:bg-error-container/20 hover:border-error/40 active:scale-95'
-          : 'bg-surface-container-high/40 text-on-surface-variant/20 border border-dashed border-outline-variant/20 hover:bg-primary-container/10 hover:border-primary-container/40 active:scale-95 cursor-pointer'
+          ? 'bg-surface-container-high text-on-surface font-bold shadow-xs border border-outline-variant hover:border-error hover:text-error active:scale-95'
+          : 'bg-surface-container-low text-on-surface-variant/30 border border-dashed border-outline-variant hover:bg-surface-container hover:border-primary-container active:scale-95 cursor-pointer'
       }`}
     >
       {isFilled ? (
         <span
-          className={`font-black text-primary-fixed ${
+          className={`font-bold text-on-surface ${
             boardSize === 10
               ? 'text-[11px] sm:text-xs leading-none'
               : 'text-base'
@@ -47,13 +56,11 @@ const BoardSetupCell = React.memo(function BoardSetupCell({
           {val}
         </span>
       ) : (
-        <span
-          className={`material-symbols-outlined opacity-25 ${
-            boardSize === 10 ? 'text-[10px]' : 'text-[14px]'
+        <PlusIcon
+          className={`opacity-30 ${
+            boardSize === 10 ? 'w-2.5 h-2.5' : 'w-4 h-4'
           }`}
-        >
-          add
-        </span>
+        />
       )}
     </button>
   );
@@ -112,13 +119,11 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
     if (isReady) return;
     const current = board[idx];
     if (current !== null) {
-      // Clear the cell. nextNumber does NOT decrement — future taps continue from current counter.
       sounds.playTap();
       const nextBoard = [...board];
       nextBoard[idx] = null;
       setBoard(nextBoard);
     } else {
-      // Only assign if we still have numbers left in sequence
       if (nextNumber > totalCells) return;
       sounds.playDraft(440 + (nextNumber % (boardSize === 10 ? 50 : 25)) * 14);
       const nextBoard = [...board];
@@ -135,7 +140,6 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
     for (let i = 1; i <= totalCells; i++) {
       if (!usedNumbers.has(i)) remainingNums.push(i);
     }
-    // Fisher-Yates shuffle of remaining numbers
     for (let i = remainingNums.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [remainingNums[i], remainingNums[j]] = [remainingNums[j], remainingNums[i]];
@@ -146,7 +150,7 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
       return remainingNums[remIdx++];
     });
     setBoard(nextBoard);
-    setNextNumber(totalCells + 1); // all filled
+    setNextNumber(totalCells + 1);
   }, [board, totalCells, usedNumbers]);
 
   // Clear = reset board to all-empty and restart counter from 1
@@ -174,21 +178,21 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
             onBack();
           }}
           disabled={isReady}
-          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high/70 text-on-surface-variant hover:text-primary transition-all text-xs font-bold border border-outline-variant/20 disabled:opacity-40"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high transition-all text-xs font-semibold border border-outline-variant disabled:opacity-40"
         >
-          <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+          <ArrowLeftIcon className="w-3.5 h-3.5" />
           <span>Back</span>
         </button>
 
         {/* Mode Tag & Status */}
         <div className="flex items-center gap-1.5">
-          <span className="font-label-sm text-[11px] font-black uppercase tracking-wider bg-secondary-container/25 text-secondary-fixed px-2.5 py-1 rounded-full border border-secondary/30">
+          <span className="font-label-sm text-[11px] font-semibold uppercase tracking-wider bg-surface-container text-on-surface px-2.5 py-1 rounded-full border border-outline-variant">
             {boardSize === 10 ? 'Mega 10x10' : 'Classic 5x5'}
           </span>
-          <span className={`font-label-sm text-xs font-black px-3 py-1 rounded-full border ${
+          <span className={`font-label-sm text-xs font-semibold px-3 py-1 rounded-full border ${
             isComplete
-              ? 'text-primary-fixed bg-primary-container/25 border-primary-container/40'
-              : 'text-on-surface-variant bg-surface-container-high/60 border-outline-variant/20'
+              ? 'text-primary-container bg-primary-container/10 border-primary-container/30'
+              : 'text-on-surface-variant bg-surface-container border-outline-variant'
           }`}>
             {isComplete ? `\u2713 ${totalCells}/${totalCells}` : `${placedCount}/${totalCells}`}
           </span>
@@ -197,19 +201,19 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
 
       {/* Error Notice Banner */}
       {errorMessage && (
-        <div className="w-full bg-error-container/80 backdrop-blur-md rounded-xl p-2.5 border border-error/40 flex items-center gap-2 text-on-error shadow-sm animate-shake">
-          <span className="material-symbols-outlined text-[18px] text-error shrink-0">error</span>
-          <span className="text-xs font-bold leading-tight">{errorMessage}</span>
+        <div className="w-full bg-error-container text-on-error-container rounded-xl p-2.5 border border-error/20 flex items-center gap-2 shadow-xs">
+          <ExclamationCircleIcon className="w-4 h-4 text-error shrink-0" />
+          <span className="text-xs font-semibold leading-tight">{errorMessage}</span>
         </div>
       )}
 
-      {/* Host Mode Switcher Banner (Shown before locking board) */}
+      {/* Host Mode Switcher Banner */}
       {isHost && onSwitchMode && !isReady && (
-        <div className="w-full bg-surface-container/70 backdrop-blur-md rounded-xl p-2 border border-outline-variant/30 flex items-center justify-between gap-2 shadow-sm">
-          <span className="font-label-sm text-[11px] text-on-surface-variant font-bold pl-1">
+        <div className="w-full bg-surface-container/60 backdrop-blur-xl rounded-xl p-2 border border-outline-variant flex items-center justify-between gap-2 shadow-xs">
+          <span className="font-label-sm text-[11px] text-on-surface-variant font-semibold pl-1">
             Duel Mode:
           </span>
-          <div className="flex items-center p-0.5 rounded-lg bg-surface-container-lowest/80 border border-outline-variant/20">
+          <div className="flex items-center p-0.5 rounded-lg bg-surface-container-low border border-outline-variant">
             <button
               type="button"
               onClick={() => {
@@ -218,9 +222,9 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
                   onSwitchMode(5);
                 }
               }}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
+              className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
                 boardSize === 5
-                  ? 'bg-surface-container-high text-primary-container shadow-sm border border-primary-container/30'
+                  ? 'bg-surface-container-high text-primary-container shadow-xs border border-outline-variant'
                   : 'text-on-surface-variant hover:text-on-surface'
               }`}
             >
@@ -234,9 +238,9 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
                   onSwitchMode(10);
                 }
               }}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
+              className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
                 boardSize === 10
-                  ? 'bg-surface-container-high text-secondary shadow-sm border border-secondary/30'
+                  ? 'bg-surface-container-high text-primary-container shadow-xs border border-outline-variant'
                   : 'text-on-surface-variant hover:text-on-surface'
               }`}
             >
@@ -248,31 +252,31 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
 
       {/* Instruction hint: shows next number in sequence */}
       {!isReady && !isComplete && (
-        <div className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl bg-surface-container/60 border border-outline-variant/15">
+        <div className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl bg-surface-container/60 border border-outline-variant">
           <div className="flex items-center gap-1.5">
-            <span className="material-symbols-outlined text-primary-container text-[15px]">touch_app</span>
-            <span className="text-[11px] text-on-surface-variant font-bold">
+            <SparklesIcon className="w-3.5 h-3.5 text-primary-container" />
+            <span className="text-[11px] text-on-surface-variant font-medium">
               Tap empty cells to place numbers in order
             </span>
           </div>
-          <span className="text-[11px] text-primary-fixed font-black tabular-nums shrink-0">
+          <span className="text-[11px] text-on-surface font-semibold tabular-nums shrink-0">
             Next: <span className="text-primary-container">#{nextNumber}</span>
           </span>
         </div>
       )}
 
       {/* Bingo Board Container */}
-      <div className="w-full aspect-square bg-surface-container/90 backdrop-blur-2xl rounded-2xl p-2.5 sm:p-3 shadow-2xl border border-outline-variant/30 flex flex-col justify-between">
+      <div className="w-full aspect-square bg-surface-container/80 backdrop-blur-xl rounded-2xl p-2.5 sm:p-3 shadow-xs border border-outline-variant flex flex-col justify-between">
         {/* Column Headers (B-I-N-G-O or B-I-N-G-O-D-U-E-L-!) */}
         <div
-          className={`grid gap-1 text-center font-headline-sm text-xs font-black pb-1 ${
+          className={`grid gap-1 text-center font-headline-sm text-xs font-bold pb-1 text-on-surface-variant ${
             boardSize === 10
-              ? 'grid-cols-10 text-[10px] sm:text-xs text-primary-fixed'
-              : 'grid-cols-5 text-xs text-secondary-fixed'
+              ? 'grid-cols-10 text-[10px] sm:text-xs'
+              : 'grid-cols-5 text-xs'
           }`}
         >
           {headers.map((letter, idx) => (
-            <div key={idx} className="tracking-wider drop-shadow-sm">
+            <div key={idx} className="tracking-wider">
               {letter}
             </div>
           ))}
@@ -302,11 +306,11 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
 
       {/* Actions */}
       {isReady ? (
-        <div className="w-full rounded-2xl bg-surface-container-high/90 backdrop-blur-xl p-4 shadow-xl border border-primary-container/40 flex items-center justify-between">
+        <div className="w-full rounded-2xl bg-surface-container-high/90 backdrop-blur-xl p-4 shadow-xs border border-primary-container/40 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="w-3 h-3 rounded-full bg-primary-container animate-ping" />
+            <span className="w-2.5 h-2.5 rounded-full bg-primary-container animate-pulse" />
             <div className="flex flex-col text-left">
-              <span className="font-headline-sm text-sm font-bold text-primary-fixed">
+              <span className="font-headline-sm text-sm font-semibold text-on-surface">
                 Board Ready &amp; Locked!
               </span>
               <span className="font-body-sm text-xs text-on-surface-variant">
@@ -314,47 +318,61 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
               </span>
             </div>
           </div>
-          <span className="material-symbols-outlined text-primary-container text-[24px]">lock</span>
+          <LockClosedIcon className="w-5 h-5 text-primary-container" />
         </div>
       ) : (
         <div className="flex flex-col gap-2 w-full">
           <div className="grid grid-cols-4 gap-2">
-            {/* Shuffle = fills remaining empty cells randomly */}
+            {/* Shuffle button */}
             <button
               type="button"
               onClick={handleShuffle}
               disabled={isComplete}
-              className="col-span-1 h-12 rounded-xl bg-surface-container-high hover:bg-surface-bright text-on-surface active:scale-95 transition-all text-xs font-bold border border-outline-variant/20 flex items-center justify-center gap-1 disabled:opacity-40 disabled:pointer-events-none"
+              className="col-span-1 h-12 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface active:scale-95 transition-all text-xs font-semibold border border-outline-variant flex items-center justify-center gap-1 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[18px]">casino</span>
+              <ArrowPathIcon className="w-4 h-4" />
               <span>Shuffle</span>
             </button>
 
+            {/* Clear button */}
             <button
               type="button"
               onClick={handleClear}
               disabled={placedCount === 0}
-              className="col-span-1 h-12 rounded-xl bg-surface-container-high hover:bg-surface-bright text-on-surface hover:text-error active:scale-95 transition-all text-xs font-bold border border-outline-variant/20 flex items-center justify-center gap-1 disabled:opacity-40 disabled:pointer-events-none"
+              className="col-span-1 h-12 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface hover:text-error active:scale-95 transition-all text-xs font-semibold border border-outline-variant flex items-center justify-center gap-1 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
+              <TrashIcon className="w-4 h-4" />
               <span>Clear</span>
             </button>
 
+            {/* Lock Board & Play button */}
             <button
               type="button"
               disabled={!isComplete || loading}
               onClick={handleConfirm}
-              className="col-span-2 h-12 rounded-xl bg-gradient-to-r from-primary-fixed to-primary-container text-on-primary-fixed font-headline-sm text-sm font-black shadow-[0_0_20px_rgba(0,245,212,0.4)] active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none hover:brightness-105"
+              className="col-span-2 h-12 rounded-xl bg-primary-container text-on-primary-container font-headline-sm text-sm font-semibold shadow-xs active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none hover:opacity-95 cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[20px]">
-                {loading ? 'hourglass_top' : isComplete ? 'check_circle' : 'lock_clock'}
-              </span>
-              <span>{loading ? 'Locking...' : 'Lock Board & Play'}</span>
+              {loading ? (
+                <>
+                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                  <span>Locking...</span>
+                </>
+              ) : isComplete ? (
+                <>
+                  <CheckCircleIcon className="w-4 h-4" />
+                  <span>Lock &amp; Play</span>
+                </>
+              ) : (
+                <>
+                  <LockClosedIcon className="w-4 h-4" />
+                  <span>Lock &amp; Play</span>
+                </>
+              )}
             </button>
           </div>
           {/* Partial-fill shortcut hint */}
           {placedCount > 0 && placedCount < totalCells && (
-            <p className="text-center text-[10px] text-on-surface-variant/50 font-medium">
+            <p className="text-center text-[10px] text-on-surface-variant font-medium">
               {totalCells - placedCount} remaining — tap Shuffle to auto-fill the rest
             </p>
           )}

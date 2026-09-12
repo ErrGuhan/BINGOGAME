@@ -55,6 +55,23 @@ export interface CallNumberResult {
   all_called_count: number;
 }
 
+export type LeaderboardVariant = '5x5' | '10x10';
+
+export interface LeaderboardEntry {
+  rank: number;
+  player_id: string;
+  display_name: string;
+  wins: number;
+  matches_played: number;
+  last_win_at: string | null;
+}
+
+export interface PlayerRank {
+  rank: number;
+  wins: number;
+  matches_played: number;
+}
+
 export interface RealtimeNumberCalledPayload {
   number: number;
   sequence: number;

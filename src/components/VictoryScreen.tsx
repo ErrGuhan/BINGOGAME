@@ -2,9 +2,18 @@
 
 import React, { useEffect, useState } from 'react';
 import confetti from 'canvas-confetti';
+import {
+  TrophyIcon,
+  ArrowPathIcon,
+  HomeIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+  InformationCircleIcon,
+  ArrowDownTrayIcon,
+  ShareIcon,
+} from '@heroicons/react/24/outline';
 import { sounds } from './AudioController';
 import { usePWA } from '@/context/PWAContext';
-
 import { BoardSize } from '@/types/bingo';
 
 interface VictoryScreenProps {
@@ -52,7 +61,8 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
 
     if (isWinner) {
       const end = Date.now() + 2.5 * 1000;
-      const colors = ['#00f5d4', '#ddb7ff', '#ffd57d', '#26fedc'];
+      // Apple aesthetic confetti palette
+      const colors = ['#007AFF', '#34C759', '#FF9F0A', '#FF3B30'];
 
       (function frame() {
         confetti({
@@ -80,22 +90,19 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
   return (
     <div className="flex flex-col w-full max-w-md mx-auto gap-4 select-none pt-4 pb-8">
       {/* Victory Card */}
-      <div className="w-full rounded-2xl bg-surface-container/80 backdrop-blur-2xl p-6 shadow-2xl border border-outline-variant/30 flex flex-col items-center text-center gap-3">
+      <div className="w-full rounded-2xl bg-surface-container/80 backdrop-blur-xl p-6 shadow-xs border border-outline-variant flex flex-col items-center text-center gap-3">
         {/* Trophy Icon */}
-        <div className="relative w-24 h-24 rounded-full bg-gradient-to-tr from-primary-container via-surface-container-high to-secondary-container flex items-center justify-center shadow-xl border border-white/20">
-          <span
-            className={`material-symbols-outlined text-[48px] ${
-              isWinner ? 'text-tertiary-fixed drop-shadow-[0_0_16px_rgba(249,189,34,0.7)]' : 'text-outline'
+        <div className="relative w-20 h-20 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center shadow-xs">
+          <TrophyIcon
+            className={`w-10 h-10 ${
+              isWinner ? 'text-primary-container' : 'text-on-surface-variant'
             }`}
-            style={{ fontVariationSettings: "'FILL' 1" }}
-          >
-            {isWinner ? 'emoji_events' : 'military_tech'}
-          </span>
+          />
         </div>
 
         {/* Victory Title */}
         <div className="flex flex-col items-center gap-1">
-          <h2 className="font-headline-xl-mobile text-3xl font-black tracking-tight bg-gradient-to-r from-primary-container via-primary-fixed to-secondary text-transparent bg-clip-text drop-shadow-[0_0_20px_rgba(0,245,212,0.4)]">
+          <h2 className="font-headline-xl-mobile text-3xl font-bold tracking-tight text-on-surface">
             {isWinner ? 'VICTORY!' : `${winnerName.toUpperCase()} WON`}
           </h2>
           <p className="font-body-md text-sm text-on-surface-variant">
@@ -107,37 +114,37 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
 
         {/* Match Stats Summary */}
         <div className="w-full grid grid-cols-2 gap-2 mt-2">
-          <div className="bg-surface-container-high/80 rounded-xl p-3 border border-outline-variant/20 flex flex-col items-center">
-            <span className="font-label-sm text-[10px] text-on-surface-variant uppercase font-bold">
+          <div className="bg-surface-container-low rounded-xl p-3 border border-outline-variant flex flex-col items-center">
+            <span className="font-label-sm text-[10px] text-on-surface-variant uppercase font-semibold">
               Your {boardSize === 10 ? 'Strikes' : 'Lines'}
             </span>
-            <span className="font-headline-sm text-lg text-primary-fixed font-black">
+            <span className="font-headline-sm text-lg text-on-surface font-bold">
               {myLines} / {targetLines}
             </span>
           </div>
-          <div className="bg-surface-container-high/80 rounded-xl p-3 border border-outline-variant/20 flex flex-col items-center">
-            <span className="font-label-sm text-[10px] text-on-surface-variant uppercase font-bold">
+          <div className="bg-surface-container-low rounded-xl p-3 border border-outline-variant flex flex-col items-center">
+            <span className="font-label-sm text-[10px] text-on-surface-variant uppercase font-semibold">
               Total Calls
             </span>
-            <span className="font-headline-sm text-lg text-on-surface font-black">
+            <span className="font-headline-sm text-lg text-on-surface font-bold">
               {totalCalls}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Rematch Challenge Prompt (When opponent sends a challenge) */}
+      {/* Rematch Challenge Prompt */}
       {rematchStatus === 'received' && (
-        <div className="w-full rounded-2xl bg-surface-container-high/95 backdrop-blur-2xl p-5 border-2 border-primary-container shadow-[0_0_32px_rgba(0,245,212,0.35)] flex flex-col items-center text-center gap-3 animate-fadeIn">
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-primary-container/20 border border-primary-container/40">
-            <span className="w-2.5 h-2.5 rounded-full bg-primary-container animate-ping" />
-            <span className="font-label-sm text-xs font-black text-primary-fixed uppercase tracking-wider">
+        <div className="w-full rounded-2xl bg-surface-container/90 backdrop-blur-xl p-5 border border-primary-container shadow-xs flex flex-col items-center text-center gap-3 animate-fadeIn">
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-primary-container/10 border border-primary-container/20">
+            <span className="w-2 h-2 rounded-full bg-primary-container animate-pulse" />
+            <span className="font-label-sm text-xs font-semibold text-primary-container uppercase tracking-wider">
               Rematch Challenge
             </span>
           </div>
 
           <div className="flex flex-col items-center gap-1">
-            <h3 className="font-headline-sm text-lg font-black text-on-surface">
+            <h3 className="font-headline-sm text-base font-bold text-on-surface">
               {rematchRequesterName || opponentName} asks for a Rematch!
             </h3>
             <p className="font-body-sm text-xs text-on-surface-variant">
@@ -152,9 +159,9 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
                 sounds.playVictory();
                 onAcceptRematch?.();
               }}
-              className="h-12 rounded-xl bg-gradient-to-r from-primary-fixed to-primary-container text-on-primary-fixed font-headline-sm text-sm font-black shadow-[0_0_20px_rgba(0,245,212,0.5)] hover:brightness-105 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              className="h-11 rounded-xl bg-primary-container text-on-primary-container font-semibold text-sm shadow-xs hover:opacity-95 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[20px]">check_circle</span>
+              <CheckCircleIcon className="w-4 h-4" />
               <span>Accept</span>
             </button>
 
@@ -164,9 +171,9 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
                 sounds.playTap();
                 onDeclineRematch?.();
               }}
-              className="h-12 rounded-xl bg-surface-container-highest hover:bg-surface-bright text-error font-bold text-sm border border-error/30 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              className="h-11 rounded-xl bg-surface-container-high hover:bg-surface-container-highest text-error font-semibold text-sm border border-outline-variant active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[18px]">cancel</span>
+              <XCircleIcon className="w-4 h-4" />
               <span>Reject</span>
             </button>
           </div>
@@ -175,8 +182,8 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
 
       {/* Rematch Rejected Banner */}
       {rematchStatus === 'declined' && (
-        <div className="w-full rounded-xl bg-error-container/40 border border-error/40 p-3 flex items-center justify-center gap-2 text-error text-xs font-bold animate-fadeIn">
-          <span className="material-symbols-outlined text-[18px]">info</span>
+        <div className="w-full rounded-xl bg-error-container text-on-error-container border border-error/20 p-3 flex items-center justify-center gap-2 text-xs font-semibold animate-fadeIn">
+          <InformationCircleIcon className="w-4 h-4 text-error shrink-0" />
           <span>{rematchRequesterName || opponentName} rejected the rematch. Returning to arena...</span>
         </div>
       )}
@@ -185,8 +192,8 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
       <div className="flex flex-col w-full gap-2.5">
         {rematchStatus === 'requesting' ? (
           <div className="w-full flex flex-col gap-2">
-            <div className="w-full h-14 rounded-2xl bg-surface-container-high/90 border border-primary-container/40 text-primary-fixed font-headline-sm text-sm font-bold flex items-center justify-center gap-2.5 shadow-md">
-              <span className="w-4 h-4 border-2 border-primary-container border-t-transparent rounded-full animate-spin" />
+            <div className="w-full h-13 rounded-2xl bg-surface-container border border-outline-variant text-on-surface font-headline-sm text-sm font-semibold flex items-center justify-center gap-2.5 shadow-xs">
+              <ArrowPathIcon className="w-4 h-4 animate-spin text-primary-container" />
               <span>Waiting for {opponentName} to accept...</span>
             </div>
             <button
@@ -195,7 +202,7 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
                 sounds.playTap();
                 onCancelRematchRequest?.();
               }}
-              className="text-xs text-on-surface-variant/70 hover:text-on-surface transition-colors text-center py-1 cursor-pointer"
+              className="text-xs text-on-surface-variant hover:text-on-surface transition-colors text-center py-1 cursor-pointer font-medium"
             >
               Cancel Request
             </button>
@@ -207,9 +214,9 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
               sounds.playTap();
               onRematch();
             }}
-            className="w-full h-14 rounded-2xl bg-gradient-to-r from-primary-fixed to-primary-container text-on-primary-fixed font-headline-sm text-base font-black shadow-[0_0_24px_rgba(0,245,212,0.45)] hover:brightness-105 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
+            className="w-full h-13 rounded-2xl bg-primary-container text-on-primary-container font-headline-sm text-base font-semibold shadow-xs hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
           >
-            <span className="material-symbols-outlined text-[22px]">replay</span>
+            <ArrowPathIcon className="w-4 h-4" />
             <span>Play Rematch</span>
           </button>
         )}
@@ -220,9 +227,9 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
             sounds.playTap();
             onBackToHome();
           }}
-          className="w-full h-12 rounded-2xl bg-surface-container-high hover:bg-surface-bright text-on-surface font-bold text-sm active:scale-[0.98] transition-all flex items-center justify-center gap-2 border border-outline-variant/25 cursor-pointer"
+          className="w-full h-12 rounded-2xl bg-surface-container hover:bg-surface-container-high text-on-surface font-semibold text-sm active:scale-[0.98] transition-all flex items-center justify-center gap-2 border border-outline-variant cursor-pointer"
         >
-          <span className="material-symbols-outlined text-[18px]">home</span>
+          <HomeIcon className="w-4 h-4" />
           <span>Back to Arena</span>
         </button>
 
@@ -238,9 +245,9 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
                 setShowIOSGuide(true);
               }
             }}
-            className="w-full h-12 rounded-2xl bg-surface-container-high/60 hover:bg-surface-container-high text-primary-fixed font-bold text-sm border border-primary-container/40 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary-container/10 cursor-pointer mt-1"
+            className="w-full h-12 rounded-2xl bg-surface-container hover:bg-surface-container-high text-on-surface font-semibold text-sm border border-outline-variant active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer mt-1"
           >
-            <span className="material-symbols-outlined text-[20px]">install_mobile</span>
+            <ArrowDownTrayIcon className="w-4 h-4 text-primary-container" />
             <span>Install BingoDuel App</span>
           </button>
         )}
@@ -248,21 +255,21 @@ export const VictoryScreen: React.FC<VictoryScreenProps> = ({
 
       {/* iOS Install Instructions Modal */}
       {showIOSGuide && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm rounded-2xl bg-surface-container-high p-6 border border-outline-variant/30 flex flex-col items-center text-center gap-4 shadow-2xl">
-            <div className="w-12 h-12 rounded-2xl bg-primary-container/20 flex items-center justify-center text-primary-fixed">
-              <span className="material-symbols-outlined text-[28px]">ios_share</span>
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-surface-container p-6 border border-outline-variant flex flex-col items-center text-center gap-4 shadow-xl">
+            <div className="w-12 h-12 rounded-2xl bg-primary-container/10 border border-primary-container/20 flex items-center justify-center text-primary-container">
+              <ShareIcon className="w-6 h-6" />
             </div>
-            <h3 className="font-headline-sm text-lg font-black text-on-surface">Install on iOS</h3>
+            <h3 className="font-headline-sm text-lg font-bold text-on-surface">Install on iOS</h3>
             <p className="font-body-sm text-xs text-on-surface-variant leading-relaxed">
               1. Tap the <strong className="text-on-surface font-semibold">Share</strong> button in Safari&apos;s bottom toolbar.<br />
               2. Scroll down and tap <strong className="text-on-surface font-semibold">&apos;Add to Home Screen&apos;</strong>.<br />
-              3. Tap <strong className="text-primary-fixed font-semibold">&apos;Add&apos;</strong> in the top right.
+              3. Tap <strong className="text-primary-container font-semibold">&apos;Add&apos;</strong> in the top right.
             </p>
             <button
               type="button"
               onClick={() => setShowIOSGuide(false)}
-              className="w-full h-10 rounded-xl bg-primary-container text-black font-bold text-xs hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+              className="w-full h-10 rounded-xl bg-primary-container text-on-primary-container font-semibold text-xs hover:opacity-95 active:scale-95 transition-all cursor-pointer"
             >
               Got it
             </button>

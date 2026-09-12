@@ -1,6 +1,12 @@
 'use client';
 
 import React from 'react';
+import {
+  ArrowPathIcon,
+  TrophyIcon,
+  FlagIcon,
+  BoltIcon,
+} from '@heroicons/react/24/outline';
 import { sounds } from './AudioController';
 
 interface ReconnectingModalProps {
@@ -21,93 +27,85 @@ export const ReconnectingModal: React.FC<ReconnectingModalProps> = ({
   const canClaimWin = countdown <= 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-container-padding-mobile bg-surface-container-lowest/80 backdrop-blur-xl">
-      <div className="relative w-full max-w-sm rounded-[24px] bg-surface-container-high/95 backdrop-blur-2xl p-space-lg flex flex-col items-center text-center shadow-[0_16px_48px_rgba(0,0,0,0.65)] border border-outline-variant/30">
-        {/* Animated Spin & Wifi Off Graphic */}
-        <div className="relative w-20 h-20 mb-space-md flex items-center justify-center">
-          <svg className="absolute inset-0 w-full h-full animate-spin [animation-duration:3s]" viewBox="0 0 100 100">
-            <circle cx="50" cy="50" fill="none" r="42" stroke="#26293a" strokeWidth="6" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/40 backdrop-blur-sm">
+      <div className="relative w-full max-w-sm rounded-2xl bg-surface-container/95 backdrop-blur-xl p-6 flex flex-col items-center text-center shadow-2xl border border-outline-variant">
+        {/* Network Spinner Graphic */}
+        <div className="relative w-16 h-16 mb-4 flex items-center justify-center">
+          <svg className="absolute inset-0 w-full h-full animate-spin [animation-duration:2.5s]" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" fill="none" r="40" stroke="var(--outline-variant)" strokeWidth="4" />
             <circle
-              className="drop-shadow-[0_0_8px_#00f5d4]"
               cx="50"
               cy="50"
               fill="none"
-              r="42"
-              stroke="#00f5d4"
-              strokeDasharray="80 180"
+              r="40"
+              stroke="var(--primary-container)"
+              strokeDasharray="70 180"
               strokeLinecap="round"
-              strokeWidth="6"
+              strokeWidth="4"
             />
           </svg>
-          <div className="w-14 h-14 rounded-full bg-surface-container-highest flex items-center justify-center shadow-[0_0_24px_rgba(249,189,34,0.35)] animate-pulse">
-            <span
-              className="material-symbols-outlined text-[30px] text-tertiary-fixed-dim"
-              style={{ fontVariationSettings: "'FILL' 1" }}
-            >
-              wifi_off
-            </span>
+          <div className="w-10 h-10 rounded-full bg-surface-container-high flex items-center justify-center border border-outline-variant">
+            <ArrowPathIcon className="w-5 h-5 text-primary-container animate-spin" />
           </div>
         </div>
 
         {/* Match Paused Pill */}
-        <div className="inline-flex items-center space-x-space-2xs px-space-sm py-space-2xs bg-surface-container-lowest rounded-full mb-space-xs border border-tertiary-fixed-dim/30">
-          <span className="w-2 h-2 rounded-full bg-tertiary-fixed-dim animate-ping" />
-          <span className="font-label-sm text-label-sm text-tertiary-fixed-dim tracking-wide font-bold">
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-surface-container rounded-full mb-2 border border-outline-variant">
+          <span className="w-2 h-2 rounded-full bg-tertiary-fixed animate-pulse" />
+          <span className="font-label-sm text-xs text-on-surface tracking-wide font-semibold">
             MATCH PAUSED
           </span>
         </div>
 
-        <h2 className="font-headline-md text-headline-md text-on-surface font-extrabold tracking-tight mb-space-2xs">
+        <h2 className="font-headline-md text-lg text-on-surface font-bold tracking-tight mb-1">
           Network Interrupted
         </h2>
-        <p className="font-body-md text-body-md text-on-surface-variant mb-space-sm max-w-[280px]">
-          Room <span className="text-primary font-bold">#{roomCode}</span>: Waiting for opponent{' '}
-          <span className="text-secondary font-bold">{opponentName}</span> to reconnect socket...
+        <p className="font-body-md text-xs text-on-surface-variant mb-4 max-w-[280px]">
+          Room <span className="text-on-surface font-semibold">#{roomCode}</span>: Waiting for opponent{' '}
+          <span className="text-on-surface font-semibold">{opponentName}</span> to reconnect...
         </p>
 
         {/* Countdown Box */}
-        <div className="w-full bg-surface-container-lowest rounded-xl p-space-xs mb-space-md flex items-center justify-between border border-outline-variant/20">
-          <div className="flex items-center space-x-space-2xs">
-            <span className="material-symbols-outlined text-[16px] text-primary-fixed-dim animate-spin" style={{ animationDuration: '2s' }}>
-              sync
-            </span>
-            <span className="font-body-sm text-body-sm text-on-surface-variant">Syncing socket</span>
+        <div className="w-full bg-surface-container-low rounded-xl p-3 mb-3 flex items-center justify-between border border-outline-variant">
+          <div className="flex items-center gap-1.5">
+            <ArrowPathIcon className="w-4 h-4 text-primary-container animate-spin" />
+            <span className="font-body-sm text-xs text-on-surface-variant">Syncing socket</span>
           </div>
-          <div className="flex items-center space-x-space-2xs">
-            <span className="font-body-sm text-body-sm text-on-surface-variant">Timeout:</span>
-            <span className="font-headline-sm text-headline-sm text-tertiary-fixed-dim font-black tracking-tight">
+          <div className="flex items-center gap-1">
+            <span className="font-body-sm text-xs text-on-surface-variant">Timeout:</span>
+            <span className="font-headline-sm text-sm text-on-surface font-bold tabular-nums">
               {countdown}s
             </span>
           </div>
         </div>
 
         {/* Progress bar */}
-        <div className="w-full bg-surface-container rounded-full h-1.5 mb-space-lg overflow-hidden">
+        <div className="w-full bg-surface-container-low rounded-full h-1.5 mb-5 overflow-hidden border border-outline-variant">
           <div
-            className="h-full bg-gradient-to-r from-tertiary-fixed-dim via-primary-container to-primary-fixed transition-all duration-1000 ease-linear"
+            className="h-full bg-primary-container transition-all duration-1000 ease-linear"
             style={{ width: `${(countdown / 60) * 100}%` }}
           />
         </div>
 
         {/* Actions */}
-        <div className="flex flex-col w-full space-y-space-xs">
+        <div className="flex flex-col w-full gap-2">
           {canClaimWin ? (
             <button
               onClick={() => {
                 sounds.playVictory();
                 onClaimTimeoutWin?.();
               }}
-              className="w-full py-space-sm px-space-md rounded-xl bg-primary-container text-on-primary font-headline-sm text-headline-sm font-extrabold flex items-center justify-center space-x-space-2xs shadow-[0_0_20px_rgba(0,245,212,0.6)] active:scale-[0.98] transition-transform animate-pulse"
+              className="w-full h-11 rounded-xl bg-primary-container text-on-primary-container font-semibold text-sm flex items-center justify-center gap-2 shadow-xs active:scale-[0.98] transition-transform cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[20px]">emoji_events</span>
+              <TrophyIcon className="w-4 h-4" />
               <span>Claim Timeout Victory!</span>
             </button>
           ) : (
             <button
               onClick={() => sounds.playTap()}
-              className="w-full py-space-sm px-space-md rounded-xl bg-primary-container/90 text-on-primary-container font-headline-sm text-headline-sm font-extrabold flex items-center justify-center space-x-space-2xs shadow-[0_0_20px_rgba(0,245,212,0.4)] active:scale-[0.98] transition-transform"
+              className="w-full h-11 rounded-xl bg-surface-container-high text-on-surface font-semibold text-sm flex items-center justify-center gap-2 border border-outline-variant active:scale-[0.98] transition-transform cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[20px]">bolt</span>
+              <BoltIcon className="w-4 h-4 text-primary-container" />
               <span>Waiting for Reconnect...</span>
             </button>
           )}
@@ -117,9 +115,9 @@ export const ReconnectingModal: React.FC<ReconnectingModalProps> = ({
               sounds.playTap();
               onSurrender();
             }}
-            className="w-full py-space-sm px-space-md rounded-xl bg-surface-container-highest text-error font-label-lg text-label-lg flex items-center justify-center space-x-space-2xs active:scale-[0.98] transition-colors border border-error/30"
+            className="w-full h-11 rounded-xl bg-surface-container hover:bg-surface-container-high text-error font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-colors border border-outline-variant cursor-pointer"
           >
-            <span className="material-symbols-outlined text-[18px]">flag</span>
+            <FlagIcon className="w-4 h-4" />
             <span>Surrender / Leave Duel</span>
           </button>
         </div>

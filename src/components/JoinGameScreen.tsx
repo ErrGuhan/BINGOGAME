@@ -1,6 +1,13 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import {
+  ArrowLeftIcon,
+  ClipboardDocumentIcon,
+  ExclamationCircleIcon,
+  ArrowRightEndOnRectangleIcon,
+  ArrowPathIcon,
+} from '@heroicons/react/24/outline';
 import { sounds } from './AudioController';
 
 interface JoinGameScreenProps {
@@ -75,19 +82,19 @@ export const JoinGameScreen: React.FC<JoinGameScreenProps> = ({
             sounds.playTap();
             onBack();
           }}
-          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high/70 text-on-surface-variant hover:text-primary transition-all text-xs font-bold border border-outline-variant/20"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high transition-all text-xs font-semibold border border-outline-variant"
         >
-          <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+          <ArrowLeftIcon className="w-3.5 h-3.5" />
           <span>Back</span>
         </button>
-        <span className="font-label-sm text-[11px] text-secondary-fixed uppercase font-black tracking-wider bg-secondary-container/20 px-2.5 py-0.5 rounded-full border border-secondary/30">
+        <span className="font-label-sm text-[11px] text-primary-container uppercase font-semibold tracking-wider bg-primary-container/10 px-2.5 py-0.5 rounded-full border border-primary-container/20">
           Join Arena
         </span>
       </div>
 
       {/* Header Info */}
       <div className="flex flex-col items-center text-center gap-1">
-        <h1 className="font-headline-xl-mobile text-2xl text-on-surface tracking-tight font-black">
+        <h1 className="font-headline-xl-mobile text-2xl text-on-surface tracking-tight font-bold">
           Enter Room Code
         </h1>
         <p className="font-body-sm text-xs text-on-surface-variant max-w-[260px]">
@@ -97,8 +104,8 @@ export const JoinGameScreen: React.FC<JoinGameScreenProps> = ({
 
       {/* Error State Banner */}
       {error && (
-        <div className="w-full relative overflow-hidden rounded-xl bg-surface-container-high/95 backdrop-blur-xl shadow-lg border border-error/50 p-3 flex items-start gap-2.5 text-error animate-fadeIn">
-          <span className="material-symbols-outlined text-[20px] text-error mt-0.5">error</span>
+        <div className="w-full relative overflow-hidden rounded-xl bg-error-container text-on-error-container border border-error/20 p-3 flex items-start gap-2.5 animate-fadeIn">
+          <ExclamationCircleIcon className="w-5 h-5 text-error shrink-0 mt-0.5" />
           <div className="flex flex-col flex-1 min-w-0 text-left">
             <span className="font-headline-sm text-xs font-bold text-error leading-tight">
               Notice
@@ -111,7 +118,7 @@ export const JoinGameScreen: React.FC<JoinGameScreenProps> = ({
       )}
 
       {/* 4-Letter Pin Code Card */}
-      <form onSubmit={handleSubmit} className="w-full rounded-2xl bg-surface-container/80 backdrop-blur-xl p-6 shadow-xl border border-outline-variant/30 flex flex-col items-center gap-4">
+      <form onSubmit={handleSubmit} className="w-full rounded-2xl bg-surface-container/80 backdrop-blur-xl p-6 shadow-xs border border-outline-variant flex flex-col items-center gap-4">
         {/* Visual Slots Container with Direct Transparent Input */}
         <div className="relative flex items-center justify-center gap-3 w-full py-1">
           {/* Transparent Native Input Directly Accessible to Mobile Browsers */}
@@ -135,12 +142,12 @@ export const JoinGameScreen: React.FC<JoinGameScreenProps> = ({
             return (
               <div
                 key={idx}
-                className={`relative w-14 h-16 rounded-xl flex items-center justify-center text-2xl font-black transition-all ${
+                className={`relative w-14 h-16 rounded-xl flex items-center justify-center text-2xl font-bold transition-all ${
                   isActive
-                    ? 'bg-surface-container-highest border-2 border-primary-container shadow-[0_0_16px_rgba(0,245,212,0.4)] text-primary-fixed'
+                    ? 'bg-surface-container-high border-2 border-primary-container shadow-xs text-primary-container'
                     : char
-                    ? 'bg-surface-container-high border border-outline-variant/30 text-on-surface'
-                    : 'bg-surface-container-lowest/60 border border-outline-variant/20 text-on-surface-variant/30'
+                    ? 'bg-surface-container-high border border-outline-variant text-on-surface'
+                    : 'bg-surface-container-low border border-outline-variant text-on-surface-variant/30'
                 }`}
               >
                 <span>{char}</span>
@@ -156,9 +163,9 @@ export const JoinGameScreen: React.FC<JoinGameScreenProps> = ({
         <button
           type="button"
           onClick={handlePaste}
-          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high hover:bg-surface-bright text-primary-fixed text-xs font-bold border border-outline-variant/20 active:scale-95 transition-all"
+          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-medium border border-outline-variant active:scale-95 transition-all cursor-pointer"
         >
-          <span className="material-symbols-outlined text-[15px]">content_paste</span>
+          <ClipboardDocumentIcon className="w-3.5 h-3.5 text-primary-container" />
           <span>Paste Code</span>
         </button>
 
@@ -166,10 +173,19 @@ export const JoinGameScreen: React.FC<JoinGameScreenProps> = ({
         <button
           type="submit"
           disabled={code.length < 3 || loading}
-          className="w-full h-14 rounded-2xl bg-gradient-to-r from-secondary-fixed to-secondary text-on-secondary font-headline-sm text-base font-black shadow-[0_0_24px_rgba(168,85,247,0.4)] hover:brightness-105 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:pointer-events-none mt-2"
+          className="w-full h-13 rounded-2xl bg-primary-container text-on-primary-container font-headline-sm text-base font-semibold shadow-xs hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:pointer-events-none mt-2"
         >
-          <span className="material-symbols-outlined text-[22px]">login</span>
-          <span>{loading ? 'Joining Arena...' : 'Join Game'}</span>
+          {loading ? (
+            <>
+              <ArrowPathIcon className="w-5 h-5 animate-spin" />
+              <span>Joining Arena...</span>
+            </>
+          ) : (
+            <>
+              <ArrowRightEndOnRectangleIcon className="w-5 h-5" />
+              <span>Join Game</span>
+            </>
+          )}
         </button>
       </form>
     </div>

@@ -1,22 +1,14 @@
 import type { Metadata, Viewport } from "next";
-import { Outfit, Plus_Jakarta_Sans } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { PWAProvider } from "@/context/PWAContext";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 import { UpdateToast } from "@/components/UpdateToast";
 
-const outfit = Outfit({
+const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-outfit",
-  weight: ["400", "500", "600", "700", "800", "900"],
-  display: "swap",
-});
-
-const plusJakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  variable: "--font-jakarta",
-  weight: ["400", "500", "600", "700"],
+  variable: "--font-inter",
   display: "swap",
 });
 
@@ -26,7 +18,7 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "default",
     title: "BingoDuel",
   },
   icons: {
@@ -47,7 +39,10 @@ export const viewport: Viewport = {
   maximumScale: 1.0,
   userScalable: false,
   viewportFit: "cover",
-  themeColor: "#0f1222",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#F5F5F7" },
+    { media: "(prefers-color-scheme: dark)", color: "#000000" },
+  ],
 };
 
 export default function RootLayout({
@@ -56,7 +51,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`dark ${outfit.variable} ${plusJakarta.variable}`}>
+    <html lang="en" className={inter.variable}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
@@ -66,11 +61,9 @@ export default function RootLayout({
         />
       </head>
       <body className="bg-surface font-body-md text-on-surface min-h-screen relative overflow-x-hidden select-none antialiased">
-        {/* Atmospheric Ambient Mesh Gradient Background from Stitch */}
+        {/* Subtle Apple Ambient Radial Tint (Static, No Blobs) */}
         <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-          <div className="absolute -top-24 -left-20 w-80 h-80 rounded-full bg-primary-container/15 blur-[80px]" />
-          <div className="absolute top-1/3 -right-24 w-88 h-88 rounded-full bg-secondary-container/25 blur-[90px]" />
-          <div className="absolute -bottom-20 left-1/4 w-72 h-72 rounded-full bg-primary-container/10 blur-[80px]" />
+          <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[600px] h-[350px] rounded-full bg-primary-container/10 blur-[120px]" />
         </div>
         <PWAProvider>
           <ServiceWorkerRegistration />

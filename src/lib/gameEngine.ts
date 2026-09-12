@@ -159,13 +159,36 @@ function safeRemoveItem(key: string): void {
 }
 
 /**
- * Retrieves or generates an ephemeral player session ID from localStorage
+ * Retrieves or generates an ephemeral player session ID from localStorage.
+ * Used for room membership and reconnection.
  */
 export function getSessionId(): string {
   const KEY = 'bingo_duel_session_id';
   let id = safeGetItem(KEY);
   if (!id) {
     id = 'usr_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+    safeSetItem(KEY, id);
+  }
+  return id;
+}
+
+/**
+ * Retrieves or generates a STABLE player identity UUID from localStorage.
+ * Used exclusively for leaderboard win attribution — separate from session_id
+ * so leaderboard stats persist across game sessions on the same device/browser.
+ *
+ * Limitations:
+ *   - Resets if localStorage is cleared or the user switches browser/device.
+ *
+ * TODO: upgrade to Supabase anonymous/named auth so this ID follows the player
+ * across devices (swap `localStorage` storage for Supabase `auth.uid()`).
+ */
+export function getPlayerId(): string {
+  const KEY = 'bingo_duel_player_id';
+  let id = safeGetItem(KEY);
+  if (!id) {
+    // Generate a simple UUID-v4-style identifier
+    id = 'pid_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString(36);
     safeSetItem(KEY, id);
   }
   return id;
