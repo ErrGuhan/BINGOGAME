@@ -19,6 +19,7 @@ export default function App() {
   const [screen, setScreen] = useState<ScreenState>('home');
   const [autoFillBoard, setAutoFillBoard] = useState<boolean>(true);
   const [prefilledJoinCode, setPrefilledJoinCode] = useState<string>('');
+  const [showDebugHud, setShowDebugHud] = useState<boolean>(false);
 
   const {
     game,
@@ -39,6 +40,8 @@ export default function App() {
     optimisticCalled,
     isOpponentDisconnected,
     reconnectCountdown,
+    channelStatus,
+    activeGameId,
     createGame,
     setGameMode,
     joinGame,
@@ -89,18 +92,26 @@ export default function App() {
         setScreen('setup');
       }
     } else if (game.status === 'playing') {
-      setScreen('game');
+      // Gated screen transition: only advance to active match if player's board is loaded
+      if (player?.board) {
+        setScreen('game');
+      } else {
+        // Keep player on setup until their board is locked
+        if (screen !== 'setup') {
+          setScreen('setup');
+        }
+      }
     } else if (game.status === 'completed') {
       if (rematchStatus !== 'accepted') {
         setScreen('victory');
       }
     }
-  }, [game?.status, player?.is_ready, player?.player_number, screen, rematchStatus]);
+  }, [game?.status, player?.is_ready, player?.player_number, player?.board, screen, rematchStatus]);
 
   // Register rematch event callbacks (avoids React state-batching race conditions)
   React.useEffect(() => {
-    // When opponent ACCEPTS our rematch request — go to board setup
-    setOnRematchAccepted(() => () => {
+    // When opponent ACCEPTS our rematch request — go to board setup for the new match
+    setOnRematchAccepted(() => (_newRoomCode?: string) => {
       setScreen('setup');
     });
     // When opponent DECLINES our rematch request — clean up and go home
@@ -264,6 +275,7 @@ export default function App() {
             loading={loading}
             isReady={Boolean(player?.is_ready)}
             opponentName={opponentName}
+            errorMessage={error}
           />
         )}
 
@@ -333,6 +345,47 @@ export default function App() {
             onSurrender={handleBackToHome}
           />
         )}
+
+        {/* Realtime Synchronization Debug Instrumentation HUD */}
+        <aside aria-label="Realtime Sync Debug HUD" className="fixed bottom-3 right-3 z-50 flex flex-col items-end">
+          {showDebugHud && (
+            <div className="mb-2 p-3 rounded-2xl bg-surface-container-highest/95 backdrop-blur-xl border border-primary-container/40 shadow-2xl text-[11px] font-mono text-on-surface w-72 space-y-1.5 animate-in fade-in slide-in-from-bottom-2">
+              <div className="flex items-center justify-between border-b border-outline-variant/30 pb-1 font-bold text-xs">
+                <span className="text-primary-fixed">SYNC DIAGNOSTICS</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                  channelStatus === 'SUBSCRIBED'
+                    ? 'bg-primary-container/30 text-primary-fixed border border-primary-container/50'
+                    : channelStatus === 'CONNECTING'
+                    ? 'bg-tertiary-container/30 text-tertiary-fixed border border-tertiary/50'
+                    : 'bg-error-container/30 text-error border border-error/50'
+                }`}>
+                  {channelStatus}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1 text-[10px]">
+                <div><span className="text-on-surface-variant font-medium">Room:</span> <span className="font-bold">{game?.room_code || 'None'}</span></div>
+                <div><span className="text-on-surface-variant font-medium">Status:</span> <span className="font-bold">{game?.status || 'idle'}</span></div>
+                <div className="col-span-2 truncate"><span className="text-on-surface-variant font-medium">GameID:</span> <span className="font-bold">{activeGameId ? activeGameId.slice(0, 13) + '...' : 'none'}</span></div>
+                <div><span className="text-on-surface-variant font-medium">P1:</span> <span className="font-bold">{p1?.is_ready ? '✓ LOCKED' : '○ WAIT'}</span></div>
+                <div><span className="text-on-surface-variant font-medium">P2:</span> <span className="font-bold">{p2?.is_ready ? '✓ LOCKED' : '○ WAIT'}</span></div>
+                <div><span className="text-on-surface-variant font-medium">My Board:</span> <span className="font-bold">{player?.board ? `${player.board.length} cells` : 'none'}</span></div>
+                <div><span className="text-on-surface-variant font-medium">Calls:</span> <span className="font-bold">{calledNumbers.length}</span></div>
+                <div className="col-span-2"><span className="text-on-surface-variant font-medium">Turn:</span> <span className={`font-bold ${isMyTurn ? 'text-primary-fixed' : 'text-on-surface-variant'}`}>{isMyTurn ? 'YOUR TURN' : 'OPPONENT TURN'}</span></div>
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowDebugHud(prev => !prev)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container-high/90 hover:bg-surface-bright backdrop-blur-md text-[11px] font-bold text-on-surface border border-outline-variant/30 shadow-lg cursor-pointer transition-all active:scale-95"
+            title="Toggle Multiplayer Sync HUD"
+          >
+            <span className={`w-2 h-2 rounded-full ${
+              channelStatus === 'SUBSCRIBED' ? 'bg-primary-container animate-pulse' : channelStatus === 'CONNECTING' ? 'bg-amber-400' : 'bg-red-500'
+            }`} />
+            <span>SYNC HUD</span>
+          </button>
+        </aside>
       </main>
     </>
   );

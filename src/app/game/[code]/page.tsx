@@ -1,6 +1,6 @@
 'use client';
 
-import React, { use, useState, useEffect, Suspense } from 'react';
+import React, { use, useState, useEffect, useRef, Suspense } from 'react';
 import { Header } from '@/components/Header';
 import { BoardSetupScreen } from '@/components/BoardSetupScreen';
 import { MainGameScreen } from '@/components/MainGameScreen';
@@ -13,7 +13,8 @@ import { sounds } from '@/components/AudioController';
 
 function GameRoomContent({ roomCode }: { roomCode: string }) {
   const router = useRouter();
-  const [hasJoined, setHasJoined] = useState(false);
+  const joinedRoomRef = useRef<string | null>(null);
+  const [showDebugHud, setShowDebugHud] = useState<boolean>(false);
 
   const {
     game,
@@ -34,6 +35,8 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
     optimisticCalled,
     isOpponentDisconnected,
     reconnectCountdown,
+    channelStatus,
+    activeGameId,
     joinGame,
     setGameMode,
     setBoard,
@@ -51,13 +54,13 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
   } = useBingoGame();
 
   useEffect(() => {
-    if (roomCode && !hasJoined) {
-      setHasJoined(true);
+    if (roomCode && joinedRoomRef.current !== roomCode) {
+      joinedRoomRef.current = roomCode;
       joinGame(roomCode).catch(err => {
         console.error('Failed to join from direct link:', err);
       });
     }
-  }, [roomCode, hasJoined, joinGame]);
+  }, [roomCode, joinGame]);
 
   const handleBoardConfirmed = async (boardData: number[]) => {
     await setBoard(boardData);
@@ -77,17 +80,17 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
       resetGame();
       router.push('/');
     });
-    // When recipient receives REMATCH_ACCEPTED broadcast — no extra navigation needed:
-    // the component conditionally renders BoardSetupScreen when rematchStatus === 'accepted'
-    setOnRematchAccepted(() => () => {
-      // state is already updated in the hook; component re-renders to BoardSetupScreen
+    // When rematch is accepted — route to the new room code if it changed
+    setOnRematchAccepted(() => (newCode?: string) => {
+      if (newCode && newCode !== roomCode) {
+        router.push(`/game/${newCode}`);
+      }
     });
     return () => {
       setOnRematchDeclined(null);
       setOnRematchAccepted(null);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]);
+  }, [router, roomCode, resetGame, setOnRematchAccepted, setOnRematchDeclined]);
 
   const handleRematch = async () => {
     try {
@@ -124,8 +127,8 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
           </div>
         )}
 
-        {/* Board Setup State (waiting/ready before play, or when rematch accepted) */}
-        {(rematchStatus === 'accepted' || (game?.status !== 'playing' && game?.status !== 'completed')) && (
+        {/* Board Setup State (waiting/ready before play, or when rematch accepted, or if playing but player hasn't locked board yet) */}
+        {(rematchStatus === 'accepted' || (game?.status !== 'playing' && game?.status !== 'completed') || (game?.status === 'playing' && !player?.board)) && (
           <BoardSetupScreen
             key={`setup_${game?.id || 'room'}_${game?.status}_${rematchStatus}_${boardSize}`}
             boardSize={boardSize}
@@ -138,31 +141,25 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
             loading={loading}
             isReady={Boolean(player?.is_ready)}
             opponentName={opponentName}
+            errorMessage={error}
           />
         )}
 
-        {/* Main Game State */}
-        {game?.status === 'playing' && rematchStatus !== 'accepted' && (
-          player?.board ? (
-            <MainGameScreen
-              board={player.board}
-              calledNumbers={calledNumbers}
-              isMyTurn={isMyTurn}
-              myLines={myLines}
-              boardSize={boardSize}
-              targetLines={targetLines}
-              playerName={player.display_name}
-              opponentName={opponentName}
-              onCallNumber={callNumber}
-              loading={loading}
-              optimisticCalled={optimisticCalled}
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center p-12 text-center">
-              <span className="w-10 h-10 border-4 border-primary-container border-t-transparent rounded-full animate-spin mb-4" />
-              <p className="text-on-surface-variant font-bold text-sm">Entering Duel Arena...</p>
-            </div>
-          )
+        {/* Main Game State (Gated: only render once player's board is locked and loaded) */}
+        {game?.status === 'playing' && rematchStatus !== 'accepted' && Boolean(player?.board) && (
+          <MainGameScreen
+            board={player!.board!}
+            calledNumbers={calledNumbers}
+            isMyTurn={isMyTurn}
+            myLines={myLines}
+            boardSize={boardSize}
+            targetLines={targetLines}
+            playerName={player!.display_name}
+            opponentName={opponentName}
+            onCallNumber={callNumber}
+            loading={loading}
+            optimisticCalled={optimisticCalled}
+          />
         )}
 
         {/* Victory State (Match completed: only show if rematch is not accepted) */}
@@ -180,7 +177,13 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
             rematchStatus={rematchStatus}
             rematchRequesterName={rematchRequesterName}
             onRematch={handleRematch}
-            onAcceptRematch={acceptRematch}
+            onAcceptRematch={async () => {
+              try {
+                await acceptRematch();
+              } catch (err) {
+                console.error('Failed to accept rematch:', err);
+              }
+            }}
             onDeclineRematch={() => {
               declineRematch();
               // Navigate decliner to home immediately (requester is handled via callback)
@@ -201,10 +204,52 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
             onSurrender={handleExitToArena}
           />
         )}
+
+        {/* Realtime Synchronization Debug Instrumentation HUD */}
+        <aside aria-label="Realtime Sync Debug HUD" className="fixed bottom-3 right-3 z-50 flex flex-col items-end">
+          {showDebugHud && (
+            <div className="mb-2 p-3 rounded-2xl bg-surface-container-highest/95 backdrop-blur-xl border border-primary-container/40 shadow-2xl text-[11px] font-mono text-on-surface w-72 space-y-1.5 animate-in fade-in slide-in-from-bottom-2">
+              <div className="flex items-center justify-between border-b border-outline-variant/30 pb-1 font-bold text-xs">
+                <span className="text-primary-fixed">SYNC DIAGNOSTICS</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                  channelStatus === 'SUBSCRIBED'
+                    ? 'bg-primary-container/30 text-primary-fixed border border-primary-container/50'
+                    : channelStatus === 'CONNECTING'
+                    ? 'bg-tertiary-container/30 text-tertiary-fixed border border-tertiary/50'
+                    : 'bg-error-container/30 text-error border border-error/50'
+                }`}>
+                  {channelStatus}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1 text-[10px]">
+                <div><span className="text-on-surface-variant font-medium">Room:</span> <span className="font-bold">{game?.room_code || 'None'}</span></div>
+                <div><span className="text-on-surface-variant font-medium">Status:</span> <span className="font-bold">{game?.status || 'idle'}</span></div>
+                <div className="col-span-2 truncate"><span className="text-on-surface-variant font-medium">GameID:</span> <span className="font-bold">{activeGameId ? activeGameId.slice(0, 13) + '...' : 'none'}</span></div>
+                <div><span className="text-on-surface-variant font-medium">P1:</span> <span className="font-bold">{p1?.is_ready ? '✓ LOCKED' : '○ WAIT'}</span></div>
+                <div><span className="text-on-surface-variant font-medium">P2:</span> <span className="font-bold">{p2?.is_ready ? '✓ LOCKED' : '○ WAIT'}</span></div>
+                <div><span className="text-on-surface-variant font-medium">My Board:</span> <span className="font-bold">{player?.board ? `${player.board.length} cells` : 'none'}</span></div>
+                <div><span className="text-on-surface-variant font-medium">Calls:</span> <span className="font-bold">{calledNumbers.length}</span></div>
+                <div className="col-span-2"><span className="text-on-surface-variant font-medium">Turn:</span> <span className={`font-bold ${isMyTurn ? 'text-primary-fixed' : 'text-on-surface-variant'}`}>{isMyTurn ? 'YOUR TURN' : 'OPPONENT TURN'}</span></div>
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowDebugHud(prev => !prev)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container-high/90 hover:bg-surface-bright backdrop-blur-md text-[11px] font-bold text-on-surface border border-outline-variant/30 shadow-lg cursor-pointer transition-all active:scale-95"
+            title="Toggle Multiplayer Sync HUD"
+          >
+            <span className={`w-2 h-2 rounded-full ${
+              channelStatus === 'SUBSCRIBED' ? 'bg-primary-container animate-pulse' : channelStatus === 'CONNECTING' ? 'bg-amber-400' : 'bg-red-500'
+            }`} />
+            <span>SYNC HUD</span>
+          </button>
+        </aside>
       </main>
     </>
   );
 }
+
 
 export default function GameRoomPage({ params }: { params: Promise<{ code: string }> }) {
   const resolvedParams = use(params);

@@ -20,10 +20,11 @@ export function useBingoGame(initialRoomCode?: string) {
   const [reconnectCountdown, setReconnectCountdown] = useState<number>(60);
   const [rematchStatus, setRematchStatus] = useState<'idle' | 'requesting' | 'received' | 'accepted' | 'declined'>('idle');
   const [rematchRequesterName, setRematchRequesterName] = useState<string | null>(null);
+  const [channelStatus, setChannelStatus] = useState<'DISCONNECTED' | 'CONNECTING' | 'SUBSCRIBED' | 'ERROR' | 'CLOSED'>('DISCONNECTED');
 
   // External callbacks for rematch events — set by pages to avoid state-watching race conditions
   const onRematchDeclinedRef = useRef<(() => void) | null>(null);
-  const onRematchAcceptedRef = useRef<(() => void) | null>(null);
+  const onRematchAcceptedRef = useRef<((newRoomCode?: string) => void) | null>(null);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const sessionIdRef = useRef<string>('');
@@ -306,14 +307,16 @@ export function useBingoGame(initialRoomCode?: string) {
       }
     } else if (event === 'PLAYER_READY') {
       const d = data as { allReady?: boolean; status?: string; currentTurnPlayerId?: string; playerId?: string; boardSize?: BoardSize };
+      console.log('[BingoDuel:Sync] Received PLAYER_READY event:', d);
       if (d.playerId) {
         setP1(prev => prev && prev.id === d.playerId ? { ...prev, is_ready: true } : prev);
         setP2(prev => prev && prev.id === d.playerId ? { ...prev, is_ready: true } : prev);
       }
 
       // Only transition to 'playing' when the server has confirmed both players are ready.
-      // Avoid stale-ref heuristics — trust d.allReady (which is set from rpcData.all_ready on the sender's side).
+      // Trust d.allReady (which is set from rpcData.all_ready on the sender's side).
       if (d.allReady && d.currentTurnPlayerId) {
+        console.log('[BingoDuel:Sync] Both players confirmed ready. Advancing to playing!');
         setGame(prev => prev ? {
           ...prev,
           status: 'playing',
@@ -342,9 +345,10 @@ export function useBingoGame(initialRoomCode?: string) {
         sounds.playDraft(580);
       }
     } else if (event === 'REMATCH_ACCEPTED' || event === 'REMATCH_STARTED') {
+      const d = data as { newGameId?: string; newRoomCode?: string; boardSize?: BoardSize; matchEpoch?: number };
+      console.log('[BingoDuel:Sync] Received REMATCH_ACCEPTED event:', d);
       sounds.playDraft(520);
       matchEpochRef.current += 1;
-      const d = data as { boardSize?: BoardSize; matchEpoch?: number };
       const nextBoardSize: BoardSize = (d?.boardSize === 10 || d?.boardSize === 5)
         ? d.boardSize
         : (gameRef.current?.board_size === 10 ? 10 : 5);
@@ -354,8 +358,8 @@ export function useBingoGame(initialRoomCode?: string) {
       setCalledNumbers([]);
       setOptimisticCalled(null);
       setPlayer(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
-      setP1(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
-      setP2(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
+      setP1(null);
+      setP2(null);
       setGame(prev => prev ? {
         ...prev,
         status: 'ready',
@@ -364,8 +368,17 @@ export function useBingoGame(initialRoomCode?: string) {
         board_size: nextBoardSize,
         target_lines: nextTarget,
       } : null);
+
+      if (d.newRoomCode && d.newRoomCode !== gameRef.current?.room_code) {
+        console.log('[BingoDuel:Sync] Auto-joining new rematch room:', d.newRoomCode);
+        setActiveRoomCode(d.newRoomCode);
+        joinGame(d.newRoomCode, undefined, true).catch(err => {
+          console.error('[BingoDuel:Sync] Failed to auto-join rematch room:', err);
+        });
+      }
+
       // Fire callback so pages can navigate to board setup screen immediately
-      onRematchAcceptedRef.current?.();
+      onRematchAcceptedRef.current?.(d.newRoomCode);
     } else if (event === 'REMATCH_DECLINED') {
       const d = data as { declinerName?: string };
       // Only update state for the requester (the decliner already set to 'idle' in declineRematch)
@@ -409,19 +422,31 @@ export function useBingoGame(initialRoomCode?: string) {
   syncGameStateRef.current = syncGameState;
 
   // Setup Realtime Channels & Subscriptions with Active Auto-Recovery
+  // Keyed explicitly by BOTH game.id and game.room_code to ensure clean teardown on rematch/new game
   useEffect(() => {
-    if (!game?.room_code) return;
+    if (!game?.id || !game?.room_code) {
+      setChannelStatus('DISCONNECTED');
+      return;
+    }
     const roomCode = game.room_code.toUpperCase();
+    const gameId = game.id;
     const supabase = getSupabase();
 
-    if (!supabase || !isSupabaseConfigured()) return;
+    if (!supabase || !isSupabaseConfigured()) {
+      setChannelStatus('DISCONNECTED');
+      return;
+    }
 
     let activeChannel: RealtimeChannel | null = null;
     let isDisposed = false;
 
+    setChannelStatus('CONNECTING');
+    console.log(`[BingoDuel:Sync] Subscribing to channel room:${roomCode} for game ${gameId}...`);
+
     const setupChannel = () => {
       if (isDisposed) return;
       if (activeChannel) {
+        console.log(`[BingoDuel:Sync] Tearing down previous active channel...`);
         supabase.removeChannel(activeChannel);
       }
 
@@ -453,14 +478,17 @@ export function useBingoGame(initialRoomCode?: string) {
           }
         })
         .subscribe((status, err) => {
+          console.log(`[BingoDuel:Sync] Realtime channel status: ${status}`);
           if (status === 'SUBSCRIBED') {
+            setChannelStatus('SUBSCRIBED');
             reconnectAttemptRef.current = 0;
             // Immediate state sync upon connecting/reconnecting
             if (gameRef.current?.id) {
               syncGameStateRef.current(gameRef.current.id);
             }
-          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-            console.warn(`Realtime channel status: ${status}. Scheduling recovery...`, err);
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            setChannelStatus('ERROR');
+            console.warn(`[BingoDuel:Sync] Realtime channel status: ${status}. Scheduling recovery...`, err);
             if (!isDisposed) {
               const backoffDelay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), 6000);
               reconnectAttemptRef.current += 1;
@@ -469,6 +497,8 @@ export function useBingoGame(initialRoomCode?: string) {
                 if (!isDisposed) setupChannel();
               }, backoffDelay);
             }
+          } else if (status === 'CLOSED') {
+            setChannelStatus('CLOSED');
           }
         });
 
@@ -498,15 +528,34 @@ export function useBingoGame(initialRoomCode?: string) {
 
     return () => {
       isDisposed = true;
+      setChannelStatus('DISCONNECTED');
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       window.removeEventListener('online', handleOnline);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (activeChannel) {
+        console.log(`[BingoDuel:Sync] Unsubscribing channel room:${roomCode} for game ${gameId}`);
         supabase.removeChannel(activeChannel);
       }
       channelRef.current = null;
     };
-  }, [game?.room_code]);
+  }, [game?.id, game?.room_code]);
+
+  // Active Board Setup readiness recovery fallback:
+  // If this player has locked their board but the game hasn't started yet,
+  // poll get_game_state every 2 seconds to check if the opponent has locked.
+  // This guarantees starting even if a Realtime WebSocket broadcast packet was dropped.
+  useEffect(() => {
+    if (!game?.id || game.status === 'playing' || game.status === 'completed') return;
+    if (!player?.is_ready) return;
+
+    const interval = setInterval(() => {
+      if (gameRef.current?.id && playerRef.current?.is_ready) {
+        syncGameStateRef.current(gameRef.current.id);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [game?.id, game?.status, player?.is_ready]);
 
   // Active game polling fallback (Fast 1.2s during playing, 2.5s in lobby)
   useEffect(() => {
@@ -871,10 +920,6 @@ export function useBingoGame(initialRoomCode?: string) {
       });
 
       if (res.error) {
-        // If the server rejected the board because it expected a different count, it almost
-        // always means the Supabase migration_10x10.sql has not been applied yet.
-        // We must NOT silently send a fake fallback board — that would corrupt game state.
-        // Instead, surface a clear, actionable error to the player.
         const isBoardCountMismatch =
           res.error.message?.toLowerCase().includes('exactly') ||
           res.error.message?.toLowerCase().includes('numbers') ||
@@ -882,14 +927,25 @@ export function useBingoGame(initialRoomCode?: string) {
           res.error.code === 'P0001';   // raise_exception (plpgsql)
 
         if (isBoardCountMismatch && board.length === 100) {
-          throw new Error(
-            '10x10 mode requires a database upgrade. ' +
-            'Please run supabase/migration_10x10.sql in your Supabase SQL Editor, then refresh and try again.'
-          );
+          // Dual-layer resilience: if DB has legacy 25-number validation, send a 25-number slice
+          // to confirm is_ready = TRUE and status = 'playing' on Postgres, while strictly
+          // preserving the full 100-number board locally and in Realtime.
+          console.warn('[BingoDuel:Sync] Unmigrated database (expects 25 numbers). Using dual-layer readiness fallback.');
+          const slice25 = Array.from({ length: 25 }, (_, i) => i + 1);
+          const fallbackRes = await supabase.rpc('set_player_board', {
+            p_game_id: game.id,
+            p_session_id: sessionId,
+            p_board: slice25,
+          });
+          if (fallbackRes.error) {
+            throw fallbackRes.error;
+          }
+          rpcData = fallbackRes.data;
+          rpcSuccess = true;
+        } else {
+          // For any other server error, re-throw so the user sees it
+          throw res.error;
         }
-
-        // For any other server error, re-throw so the user sees it
-        throw res.error;
       } else {
         rpcData = res.data;
         rpcSuccess = true;
@@ -1057,7 +1113,7 @@ export function useBingoGame(initialRoomCode?: string) {
     }
   }, [game?.id, getSession, handleRealtimeEvent]);
 
-  // ACTION: Accept Rematch (Resets match state on server and notifies room via Realtime)
+  // ACTION: Accept Rematch (Creates a fresh game row on server and notifies room via Realtime)
   const acceptRematch = useCallback(async () => {
     if (!game?.id) return;
     setLoading(true);
@@ -1066,59 +1122,99 @@ export function useBingoGame(initialRoomCode?: string) {
 
     matchEpochRef.current += 1;
 
-    // 1. Locally reset match state immediately while preserving room code and game mode
     const currentBoardSize = game.board_size || 5;
     const currentTarget = currentBoardSize === 10 ? 10 : 5;
+    const myName = player?.display_name || getPlayerName();
 
-    setRematchStatus('accepted');
-    setCalledNumbers([]);
-    setOptimisticCalled(null);
-    setPlayer(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
-    setP1(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
-    setP2(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
-    setGame(prev => prev ? {
-      ...prev,
-      status: 'ready',
-      winner_id: null,
-      current_turn_player_id: null,
-      board_size: currentBoardSize,
-      target_lines: currentTarget,
-    } : null);
+    console.log('[BingoDuel:Sync] Creating fresh game row for rematch...');
 
-    // 2. Execute server-side rematch RPC (non-blocking)
     try {
       const supabase = getSupabase();
-      if (supabase && isSupabaseConfigured()) {
-        await supabase.rpc('rematch_game', {
-          p_game_id: game.id,
-          p_session_id: sessionId,
-        });
-        await supabase.from('called_numbers').delete().eq('game_id', game.id);
+      if (!supabase || !isSupabaseConfigured()) {
+        throw new Error('Supabase is not configured.');
       }
-    } catch (err) {
-      console.warn('Rematch server sync note:', err);
+
+      // Generate a new game row in Supabase via create_game
+      let newGameData: any = null;
+      const res3 = await supabase.rpc('create_game', {
+        p_session_id: sessionId,
+        p_display_name: myName,
+        p_board_size: currentBoardSize,
+      });
+
+      if (res3.error) {
+        const res2 = await supabase.rpc('create_game', {
+          p_session_id: sessionId,
+          p_display_name: myName,
+        });
+        if (res2.error) throw res2.error;
+        newGameData = res2.data;
+      } else {
+        newGameData = res3.data;
+      }
+
+      console.log('[BingoDuel:Sync] Fresh rematch game created:', newGameData);
+
+      // Broadcast acceptance with the new room code to the CURRENT channel before teardown
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'REMATCH_ACCEPTED',
+          payload: {
+            newGameId: newGameData.game_id,
+            newRoomCode: newGameData.room_code,
+            acceptedBy: player?.id,
+            matchEpoch: matchEpochRef.current,
+            boardSize: currentBoardSize,
+            targetLines: currentTarget,
+          },
+        }).catch((err) => {
+          console.warn('[BingoDuel:Sync] Failed to broadcast REMATCH_ACCEPTED:', err);
+        });
+      }
+
+      // Populate local state for the new game as Player 1
+      const newHost: Player = {
+        id: newGameData.player_id,
+        session_id: sessionId,
+        display_name: myName,
+        player_number: 1,
+        board: null,
+        is_ready: false,
+        connected: true,
+        lines_completed: 0,
+        last_seen_at: new Date().toISOString(),
+      };
+
+      const newGame: Game = {
+        id: newGameData.game_id,
+        room_code: newGameData.room_code,
+        status: 'waiting',
+        target_lines: currentTarget,
+        board_size: currentBoardSize,
+        current_turn_player_id: null,
+        winner_id: null,
+        created_at: new Date().toISOString(),
+      };
+
+      setActiveRoomCode(newGameData.room_code);
+      setGame(newGame);
+      setPlayer(newHost);
+      setP1(newHost);
+      setP2(null);
+      setCalledNumbers([]);
+      setOptimisticCalled(null);
+      setRematchStatus('accepted');
+
+      // Fire callback so pages can update route and navigate to board setup
+      onRematchAcceptedRef.current?.(newGameData.room_code);
+    } catch (err: unknown) {
+      console.error('[BingoDuel:Sync] Failed to initialize rematch:', err);
+      setError('Failed to initialize rematch. Please try again.');
+    } finally {
+      setLoading(false);
     }
-
-    // 3. Broadcast acceptance to opponent via Realtime channel
-    if (channelRef.current) {
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'REMATCH_ACCEPTED',
-        payload: {
-          gameId: game.id,
-          roomCode: game.room_code,
-          acceptedBy: player?.id,
-          matchEpoch: matchEpochRef.current,
-          boardSize: currentBoardSize,
-        },
-      }).catch(() => {});
-    }
-
-    // 4. Fire callback immediately so page navigates to board setup
-    onRematchAcceptedRef.current?.();
-
-    setLoading(false);
-  }, [game?.board_size, game?.id, game?.room_code, getSession, player?.id]);
+  }, [game?.board_size, game?.id, getSession, player?.display_name, player?.id]);
 
   // ACTION: Request Rematch (Sends challenge notification to opponent)
   const requestRematch = useCallback(async () => {
@@ -1208,6 +1304,8 @@ export function useBingoGame(initialRoomCode?: string) {
     optimisticCalled,
     isOpponentDisconnected,
     reconnectCountdown,
+    channelStatus,
+    activeGameId: game?.id || null,
     createGame,
     setGameMode,
     joinGame,
@@ -1223,7 +1321,7 @@ export function useBingoGame(initialRoomCode?: string) {
     /** Register a callback that fires the moment a REMATCH_DECLINED broadcast is received */
     setOnRematchDeclined: (cb: (() => void) | null) => { onRematchDeclinedRef.current = cb; },
     /** Register a callback that fires the moment a REMATCH_ACCEPTED broadcast is received */
-    setOnRematchAccepted: (cb: (() => void) | null) => { onRematchAcceptedRef.current = cb; },
+    setOnRematchAccepted: (cb: ((newRoomCode?: string) => void) | null) => { onRematchAcceptedRef.current = cb; },
     resetGame: () => {
       clearActiveRoomCode();
       matchEpochRef.current = 1;

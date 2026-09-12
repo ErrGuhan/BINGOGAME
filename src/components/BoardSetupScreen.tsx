@@ -71,6 +71,7 @@ interface BoardSetupScreenProps {
   loading: boolean;
   isReady?: boolean;
   opponentName?: string;
+  errorMessage?: string | null;
 }
 
 const HEADERS_5 = ['B', 'I', 'N', 'G', 'O'];
@@ -87,6 +88,7 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
   loading,
   isReady = false,
   opponentName = 'Opponent',
+  errorMessage,
 }) => {
   const totalCells = boardSize * boardSize;
 
@@ -192,6 +194,14 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
           </span>
         </div>
       </div>
+
+      {/* Error Notice Banner */}
+      {errorMessage && (
+        <div className="w-full bg-error-container/80 backdrop-blur-md rounded-xl p-2.5 border border-error/40 flex items-center gap-2 text-on-error shadow-sm animate-shake">
+          <span className="material-symbols-outlined text-[18px] text-error shrink-0">error</span>
+          <span className="text-xs font-bold leading-tight">{errorMessage}</span>
+        </div>
+      )}
 
       {/* Host Mode Switcher Banner (Shown before locking board) */}
       {isHost && onSwitchMode && !isReady && (
