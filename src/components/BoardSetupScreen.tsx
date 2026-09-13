@@ -101,20 +101,24 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
 
   // Board: array of placed numbers (null = empty)
   const [board, setBoard] = useState<(number | null)[]>(() => Array(totalCells).fill(null));
-  // nextNumber: sequence counter — next tap on an empty cell assigns this value
-  const [nextNumber, setNextNumber] = useState<number>(1);
-
-  // Re-initialize board whenever boardSize changes
-  useEffect(() => {
-    setBoard(Array(totalCells).fill(null));
-    setNextNumber(1);
-  }, [boardSize, totalCells]);
-
   const placedCount = useMemo(() => board.filter(v => v !== null).length, [board]);
   const isComplete = placedCount === totalCells;
   const usedNumbers = useMemo(() => new Set(board.filter((v): v is number => v !== null)), [board]);
 
-  // Tap-to-assign: empty cell → assign nextNumber; filled cell → clear it
+  // Find lowest unused number 1..totalCells for seamless sequential tap-to-assign
+  const nextAvailableNumber = useMemo(() => {
+    for (let i = 1; i <= totalCells; i++) {
+      if (!usedNumbers.has(i)) return i;
+    }
+    return totalCells + 1;
+  }, [totalCells, usedNumbers]);
+
+  // Re-initialize board whenever boardSize changes
+  useEffect(() => {
+    setBoard(Array(totalCells).fill(null));
+  }, [boardSize, totalCells]);
+
+  // Tap-to-assign: empty cell → assign nextAvailableNumber; filled cell → clear it
   const handleCellClick = useCallback((idx: number) => {
     if (isReady) return;
     const current = board[idx];
@@ -124,14 +128,13 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
       nextBoard[idx] = null;
       setBoard(nextBoard);
     } else {
-      if (nextNumber > totalCells) return;
-      sounds.playDraft(440 + (nextNumber % (boardSize === 10 ? 50 : 25)) * 14);
+      if (nextAvailableNumber > totalCells) return;
+      sounds.playDraft(440 + (nextAvailableNumber % (boardSize === 10 ? 50 : 25)) * 14);
       const nextBoard = [...board];
-      nextBoard[idx] = nextNumber;
+      nextBoard[idx] = nextAvailableNumber;
       setBoard(nextBoard);
-      setNextNumber(prev => prev + 1);
     }
-  }, [board, isReady, nextNumber, totalCells]);
+  }, [board, isReady, nextAvailableNumber, totalCells, boardSize]);
 
   // Shuffle = auto-fill ALL remaining empty cells with remaining unused numbers (random order)
   const handleShuffle = useCallback(() => {
@@ -150,14 +153,12 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
       return remainingNums[remIdx++];
     });
     setBoard(nextBoard);
-    setNextNumber(totalCells + 1);
   }, [board, totalCells, usedNumbers]);
 
-  // Clear = reset board to all-empty and restart counter from 1
+  // Clear = reset board to all-empty
   const handleClear = useCallback(() => {
     sounds.playTap();
     setBoard(Array(totalCells).fill(null));
-    setNextNumber(1);
   }, [totalCells]);
 
   const handleConfirm = () => {
@@ -260,7 +261,7 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
             </span>
           </div>
           <span className="text-[11px] text-on-surface font-semibold tabular-nums shrink-0">
-            Next: <span className="text-primary-container">#{nextNumber}</span>
+            Next: <span className="text-primary-container">#{nextAvailableNumber}</span>
           </span>
         </div>
       )}

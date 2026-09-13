@@ -233,6 +233,13 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
     if (!isMyTurn || selectedNumber === null || isCalling || loading) return;
     if (calledNumbersSet.has(selectedNumber)) return;
 
+    // Client-side variant-aware range validation for instant UI feedback
+    const maxAllowedNumber = boardSize === 10 ? 100 : 25;
+    if (selectedNumber < 1 || selectedNumber > maxAllowedNumber) {
+      setLocalCallError(`Called number must be between 1 and ${maxAllowedNumber}`);
+      return;
+    }
+
     const numToCall = selectedNumber;
     setIsCalling(true);
     setLocalCallError(null);
@@ -253,7 +260,7 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
     } finally {
       setIsCalling(false);
     }
-  }, [isMyTurn, selectedNumber, isCalling, loading, calledNumbersSet, onCallNumber]);
+  }, [isMyTurn, selectedNumber, isCalling, loading, calledNumbersSet, boardSize, onCallNumber]);
 
   const latestCall = calledNumbers.length > 0 ? calledNumbers[calledNumbers.length - 1] : null;
   const historyCalls = calledNumbers.slice(0, -1).reverse();
@@ -313,7 +320,7 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
                 {playerName}
               </span>
               <span className="font-label-sm text-[11px] text-primary-container font-bold leading-none mt-0.5">
-                {myLines} / {targetLines} {boardSize === 10 ? 'Strikes' : 'Lines'}
+                {Math.max(myLines, completedLines.length)} / {targetLines} {boardSize === 10 ? 'Strikes' : 'Lines'}
               </span>
             </div>
           </div>

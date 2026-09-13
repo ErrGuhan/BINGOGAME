@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Game, Player, CalledNumber, GameStateSnapshot, CallNumberResult, BoardSize } from '@/types/bingo';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Game, Player, CalledNumber, GameStateSnapshot, CallNumberResult, BoardSize, GameVariant } from '@/types/bingo';
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase';
 import { getSessionId, getPlayerName, setPlayerName, setActiveRoomCode, clearActiveRoomCode, calculateLines, getPlayerId } from '@/lib/gameEngine';
 import { sounds } from '@/components/AudioController';
@@ -35,6 +35,8 @@ export function useBingoGame(initialRoomCode?: string) {
   const matchEpochRef = useRef<number>(1);
   const p1Ref = useRef<Player | null>(null);
   const p2Ref = useRef<Player | null>(null);
+  const playerRef = useRef<Player | null>(null);
+  const rematchStatusRef = useRef(rematchStatus);
 
   // Reliable session getter
   const getSession = useCallback(() => {
@@ -44,12 +46,10 @@ export function useBingoGame(initialRoomCode?: string) {
     return sessionIdRef.current;
   }, []);
 
-
   useEffect(() => {
     gameRef.current = game;
   }, [game]);
 
-  const playerRef = useRef<Player | null>(null);
   useEffect(() => {
     playerRef.current = player;
   }, [player]);
@@ -62,34 +62,42 @@ export function useBingoGame(initialRoomCode?: string) {
     p2Ref.current = p2;
   }, [p2]);
 
-  const rematchStatusRef = useRef(rematchStatus);
   useEffect(() => {
     rematchStatusRef.current = rematchStatus;
   }, [rematchStatus]);
 
-  const isHost = player?.player_number === 1;
+  // Derived state
+  const isHost = Boolean(player?.player_number === 1);
   const opponent = isHost ? p2 : p1;
 
-  // Strict Turn Invariant:
-  // When game is 'playing', determine activeTurnPlayerId strictly.
-  // Falls back to p1Id initially if current_turn_player_id is not yet set.
-  // Exactly ONE player will ever have isMyTurn === true.
-  const p1Id = p1?.id || (player?.player_number === 1 ? player.id : null);
-  const activeTurnPlayerId = game?.status === 'playing'
-    ? (game.current_turn_player_id || p1Id || null)
+  const activeTurnPlayerId = game?.current_turn_player_id
+    ? game.current_turn_player_id
+    : game?.status === 'playing'
+    ? p1?.id || null
     : null;
   const isMyTurn = Boolean(game?.status === 'playing' && player?.id && activeTurnPlayerId === player.id);
 
   const winner = game?.winner_id ? (game.winner_id === player?.id ? player : opponent) : null;
   const isWinner = Boolean(player && game?.winner_id && player.id === game.winner_id);
 
-  const myLines = isHost ? (p1?.lines_completed || 0) : (p2?.lines_completed || 0);
-  const opponentLines = isHost ? (p2?.lines_completed || 0) : (p1?.lines_completed || 0);
-
-  const boardSize: BoardSize = (game?.board_size === 10 ? 10 : 5);
+  const boardSize: BoardSize = (game?.variant === '10x10' || game?.board_size === 10) ? 10 : 5;
   // Always prefer the authoritative DB value; fall back to board-size derivation
   // only when the game object hasn't loaded yet.
   const targetLines: number = game?.target_lines || (boardSize === 10 ? 10 : 5);
+
+  // Synchronous client line calculation for immediate strike & header animation lockstep
+  const myCalculatedLines = useMemo(() => {
+    if (!player?.board || player.board.length === 0) return 0;
+    return calculateLines(player.board, calledNumbers.map(c => c.number), boardSize).lines;
+  }, [player?.board, calledNumbers, boardSize]);
+
+  const opponentCalculatedLines = useMemo(() => {
+    if (!opponent?.board || opponent.board.length === 0) return 0;
+    return calculateLines(opponent.board, calledNumbers.map(c => c.number), boardSize).lines;
+  }, [opponent?.board, calledNumbers, boardSize]);
+
+  const myLines = Math.max(isHost ? (p1?.lines_completed || 0) : (p2?.lines_completed || 0), myCalculatedLines);
+  const opponentLines = Math.max(isHost ? (p2?.lines_completed || 0) : (p1?.lines_completed || 0), opponentCalculatedLines);
 
   // Sync state from snapshot
   const applySnapshot = useCallback((snapshot: GameStateSnapshot | null) => {
@@ -108,9 +116,11 @@ export function useBingoGame(initialRoomCode?: string) {
       }
 
       const dbBoardSize = snapshot.game.board_size;
+      const dbVariant = snapshot.game.variant;
       const resolvedBoardSize: BoardSize = (dbBoardSize === 10 || dbBoardSize === 5)
         ? dbBoardSize
-        : (prev?.board_size === 10 ? 10 : 5);
+        : (dbVariant === '10x10' ? 10 : (prev?.board_size === 10 ? 10 : 5));
+      const resolvedVariant: GameVariant = dbVariant || (resolvedBoardSize === 10 ? '10x10' : '5x5');
       const resolvedTarget = resolvedBoardSize === 10 ? 10 : 5;
 
       // Ensure current_turn_player_id is never wiped to null during 'playing' state
@@ -122,6 +132,7 @@ export function useBingoGame(initialRoomCode?: string) {
         ...snapshot.game,
         status: (matchEpochRef.current > 1 && snapshot.game.status === 'completed' && prev?.status) ? prev.status : snapshot.game.status,
         board_size: resolvedBoardSize,
+        variant: resolvedVariant,
         target_lines: resolvedTarget,
         current_turn_player_id: resolvedTurnId,
       };
@@ -420,11 +431,12 @@ export function useBingoGame(initialRoomCode?: string) {
       setRematchStatus(prev => prev === 'received' ? 'idle' : prev);
       setRematchRequesterName(null);
     } else if (event === 'GAME_MODE_CHANGED') {
-      const d = data as { boardSize: BoardSize; targetLines: number };
+      const d = data as { boardSize: BoardSize; variant?: GameVariant; targetLines: number };
       if (d.boardSize) {
         setGame(prev => prev ? {
           ...prev,
           board_size: d.boardSize,
+          variant: d.variant || (d.boardSize === 10 ? '10x10' : '5x5'),
           target_lines: d.targetLines,
         } : null);
         setPlayer(prev => prev ? {
@@ -738,6 +750,7 @@ export function useBingoGame(initialRoomCode?: string) {
         status: data.status || 'waiting',
         target_lines: targetWinLines,
         board_size: chosenBoardSize,
+        variant: chosenBoardSize === 10 ? '10x10' : '5x5',
         current_turn_player_id: null,
         winner_id: null,
         created_at: new Date().toISOString(),
@@ -770,11 +783,13 @@ export function useBingoGame(initialRoomCode?: string) {
 
     const sessionId = getSession();
     const newTarget = newBoardSize === 10 ? 10 : 5;
+    const newVariant: GameVariant = newBoardSize === 10 ? '10x10' : '5x5';
 
     // Optimistically update host state
     setGame(prev => prev ? {
       ...prev,
       board_size: newBoardSize,
+      variant: newVariant,
       target_lines: newTarget,
     } : null);
     setPlayer(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
@@ -785,7 +800,7 @@ export function useBingoGame(initialRoomCode?: string) {
     channelRef.current?.send({
       type: 'broadcast',
       event: 'GAME_MODE_CHANGED',
-      payload: { boardSize: newBoardSize, targetLines: newTarget },
+      payload: { boardSize: newBoardSize, variant: newVariant, targetLines: newTarget },
     }).catch(() => {});
 
     try {
@@ -836,11 +851,13 @@ export function useBingoGame(initialRoomCode?: string) {
 
       setActiveRoomCode(cleanCode);
 
-      if (data?.board_size) {
-        const joinedBoardSize = data.board_size as BoardSize;
+      if (data?.board_size || data?.variant) {
+        const joinedBoardSize = (data.board_size as BoardSize) || (data.variant === '10x10' ? 10 : 5);
+        const joinedVariant: GameVariant = data.variant || (joinedBoardSize === 10 ? '10x10' : '5x5');
         setGame(prev => prev ? {
           ...prev,
           board_size: joinedBoardSize,
+          variant: joinedVariant,
           target_lines: data.target_lines || (joinedBoardSize === 10 ? 10 : 5),
         } : null);
       }
@@ -1044,6 +1061,18 @@ export function useBingoGame(initialRoomCode?: string) {
     if (!game?.id || !isMyTurn) return;
     if (calledNumbers.some(c => c.number === number)) return;
 
+    // Determine variant & max allowed number from authoritative game record
+    const is10x10 = game.variant === '10x10' || game.board_size === 10;
+    const maxAllowedNumber = is10x10 ? 100 : 25;
+
+    // Variant-aware range validation (immediate client-side protection)
+    if (number < 1 || number > maxAllowedNumber) {
+      const msg = `Called number must be between 1 and ${maxAllowedNumber}`;
+      setError(msg);
+      sounds.playAlert();
+      throw new Error(msg);
+    }
+
     // 1. Instant Optimistic UI Update & Audio Chime
     setOptimisticCalled(number);
     sounds.playCall();
@@ -1056,7 +1085,7 @@ export function useBingoGame(initialRoomCode?: string) {
         throw new Error('Supabase is not configured. Please check your environment variables in .env.local.');
       }
 
-      console.log(`[BingoDuel:Turn] Calling number #${number} in game ${game.id}...`);
+      console.log(`[BingoDuel:Turn] Calling number #${number} in game ${game.id} (${is10x10 ? '10x10' : '5x5'})...`);
 
       let rpcData: any = null;
 
@@ -1066,10 +1095,6 @@ export function useBingoGame(initialRoomCode?: string) {
         p_session_id: sessionId,
         p_number: number,
         // Pass our stable player_id for server-side leaderboard attribution.
-        // The opponent's player_id is unknown to us (it lives in their localStorage),
-        // so p_opponent_player_id is null here. The DB skips the null row gracefully.
-        // The caller always writes their OWN win; both players write their own
-        // matches_played through whichever RPC they themselves trigger.
         p_player_id: getPlayerId(),
         p_opponent_player_id: null,
       });
@@ -1091,13 +1116,100 @@ export function useBingoGame(initialRoomCode?: string) {
           });
 
           if (legacyRes.error) {
-            console.error('[BingoDuel:Turn] Legacy call_number failed:', legacyRes.error);
-            throw new Error(legacyRes.error.message || 'Call was rejected by the server');
+            const legacyErrMsg = (legacyRes.error.message || '').toLowerCase();
+            const isLegacyConstraintError =
+              legacyErrMsg.includes('between 1 and 25') ||
+              legacyErrMsg.includes('called_numbers_number_check') ||
+              legacyErrMsg.includes('check constraint');
+
+            if (is10x10 && isLegacyConstraintError) {
+              console.warn('[BingoDuel:Turn] Unmigrated database (rejects 10x10 numbers > 25). Using dual-layer turn resilience fallback.');
+              const nextSeq = (calledNumbers.length > 0 ? Math.max(...calledNumbers.map(c => c.sequence)) : 0) + 1;
+              const allCalls = [...calledNumbers.map(c => c.number), number];
+              const p1Lines = p1?.board ? calculateLines(p1.board, allCalls, 10).lines : 0;
+              const p2Lines = p2?.board ? calculateLines(p2.board, allCalls, 10).lines : 0;
+              const callerIsP1 = player?.player_number === 1;
+              const callerLines = callerIsP1 ? p1Lines : p2Lines;
+              const oppLines = callerIsP1 ? p2Lines : p1Lines;
+              const target = game.target_lines || 10;
+
+              let winnerId: string | null = null;
+              let isGameOver = false;
+              if (callerLines >= target) {
+                winnerId = player?.id || null;
+                isGameOver = true;
+              } else if (oppLines >= target) {
+                winnerId = (callerIsP1 ? p2?.id : p1?.id) || null;
+                isGameOver = true;
+              }
+
+              const nextTurnId = isGameOver ? null : (callerIsP1 ? p2?.id : p1?.id) || null;
+
+              rpcData = {
+                success: true,
+                number,
+                sequence: nextSeq,
+                called_by: player?.id,
+                next_turn_player_id: nextTurnId,
+                winner_id: winnerId,
+                is_game_over: isGameOver,
+                p1_lines: p1Lines,
+                p2_lines: p2Lines,
+                all_called_count: allCalls.length,
+              };
+            } else {
+              console.error('[BingoDuel:Turn] Legacy call_number failed:', legacyRes.error);
+              throw new Error(legacyRes.error.message || 'Call was rejected by the server');
+            }
+          } else {
+            rpcData = legacyRes.data;
           }
-          rpcData = legacyRes.data;
         } else {
-          console.error('[BingoDuel:Turn] Server rejected call_number:', primaryRes.error);
-          throw new Error(primaryRes.error.message || 'Call was rejected by the server');
+          const primaryErrMsg = (primaryRes.error.message || '').toLowerCase();
+          const isLegacyConstraintError =
+            primaryErrMsg.includes('between 1 and 25') ||
+            primaryErrMsg.includes('called_numbers_number_check') ||
+            primaryErrMsg.includes('check constraint');
+
+          if (is10x10 && isLegacyConstraintError) {
+            console.warn('[BingoDuel:Turn] Unmigrated database (rejects 10x10 numbers > 25). Using dual-layer turn resilience fallback.');
+            const nextSeq = (calledNumbers.length > 0 ? Math.max(...calledNumbers.map(c => c.sequence)) : 0) + 1;
+            const allCalls = [...calledNumbers.map(c => c.number), number];
+            const p1Lines = p1?.board ? calculateLines(p1.board, allCalls, 10).lines : 0;
+            const p2Lines = p2?.board ? calculateLines(p2.board, allCalls, 10).lines : 0;
+            const callerIsP1 = player?.player_number === 1;
+            const callerLines = callerIsP1 ? p1Lines : p2Lines;
+            const oppLines = callerIsP1 ? p2Lines : p1Lines;
+            const target = game.target_lines || 10;
+
+            let winnerId: string | null = null;
+            let isGameOver = false;
+            if (callerLines >= target) {
+              winnerId = player?.id || null;
+              isGameOver = true;
+            } else if (oppLines >= target) {
+              winnerId = (callerIsP1 ? p2?.id : p1?.id) || null;
+              isGameOver = true;
+            }
+
+            const nextTurnId = isGameOver ? null : (callerIsP1 ? p2?.id : p1?.id) || null;
+
+            rpcData = {
+              success: true,
+              number,
+              sequence: nextSeq,
+              called_by: player?.id,
+              next_turn_player_id: nextTurnId,
+              winner_id: winnerId,
+              is_game_over: isGameOver,
+              p1_lines: p1Lines,
+              p2_lines: p2Lines,
+              all_called_count: allCalls.length,
+            };
+          } else {
+            console.error('[BingoDuel:Turn] Server rejected call_number:', primaryRes.error);
+            throw new Error(primaryRes.error.message || 'Call was rejected by the server');
+          }
         }
       } else {
         rpcData = primaryRes.data;
@@ -1170,7 +1282,7 @@ export function useBingoGame(initialRoomCode?: string) {
       sounds.playAlert();
       throw err; // Re-throw so caller UI (handleExecuteCall) knows the call failed
     }
-  }, [calledNumbers, game?.id, getSession, isMyTurn, p1?.id, p2?.id, syncGameState]);
+  }, [calledNumbers, game?.id, game?.variant, game?.board_size, game?.target_lines, getSession, isMyTurn, p1?.id, p1?.board, p2?.id, p2?.board, player?.id, player?.player_number, syncGameState]);
 
   // ACTION: Claim Timeout Win
   const claimTimeoutWin = useCallback(async () => {

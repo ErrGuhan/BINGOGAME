@@ -1,23 +1,35 @@
 -- ==============================================================================
--- BINGO DUEL - NON-DESTRUCTIVE 10x10 MEGA MODE & REMATCH MIGRATION
+-- BINGO DUEL - VARIANT-AWARE NUMBER VALIDATION & 10x10 RULES MIGRATION
 -- Run this in your Supabase Dashboard > SQL Editor
--- This script safely upgrades existing tables without dropping data or active games.
+-- Safely upgrades existing tables without dropping data or active games.
 -- ==============================================================================
 
--- 1. ADD COLUMNS (Safe: IF NOT EXISTS)
+-- 1. ADD / UPDATE COLUMNS IN GAMES TABLE
+ALTER TABLE games ADD COLUMN IF NOT EXISTS variant TEXT NOT NULL DEFAULT '5x5';
 ALTER TABLE games ADD COLUMN IF NOT EXISTS board_size INT NOT NULL DEFAULT 5;
 ALTER TABLE games ADD COLUMN IF NOT EXISTS target_lines INT NOT NULL DEFAULT 5;
 
--- 2. UPDATE CONSTRAINTS
--- Allow board_size to be 5 or 10
+-- Ensure check constraints on games
+ALTER TABLE games DROP CONSTRAINT IF EXISTS games_variant_check;
+ALTER TABLE games ADD CONSTRAINT games_variant_check CHECK (variant IN ('5x5', '10x10'));
+
 ALTER TABLE games DROP CONSTRAINT IF EXISTS games_board_size_check;
 ALTER TABLE games ADD CONSTRAINT games_board_size_check CHECK (board_size IN (5, 10));
 
--- Allow called numbers up to 100 for 10x10 mode
+-- Sync existing games
+UPDATE games
+SET variant = CASE WHEN board_size = 10 THEN '10x10' ELSE '5x5' END
+WHERE variant IS NULL OR variant NOT IN ('5x5', '10x10');
+
+UPDATE games
+SET board_size = CASE WHEN variant = '10x10' THEN 10 ELSE 5 END
+WHERE board_size IS NULL OR board_size NOT IN (5, 10);
+
+-- 2. UPDATE CONSTRAINTS ON CALLED NUMBERS (Allow 1..100)
 ALTER TABLE called_numbers DROP CONSTRAINT IF EXISTS called_numbers_number_check;
 ALTER TABLE called_numbers ADD CONSTRAINT called_numbers_number_check CHECK (number >= 1 AND number <= 100);
 
--- 3. CALCULATION HELPER (Dynamic 5x5 or 10x10 Line Detection)
+-- 3. DYNAMIC LINE CALCULATION (5x5: 12 lines, 10x10: 22 lines)
 CREATE OR REPLACE FUNCTION calculate_lines(
     p_board JSONB,
     p_called_numbers INT[]
@@ -113,7 +125,7 @@ BEGIN
 END;
 $$;
 
--- 4. CREATE GAME RPC (Supports 3 arguments with default)
+-- 4. CREATE GAME RPC (Variant-aware)
 CREATE OR REPLACE FUNCTION create_game(
     p_session_id TEXT,
     p_display_name TEXT,
@@ -128,11 +140,13 @@ DECLARE
     v_game_id UUID;
     v_player_id UUID;
     v_board_sz INT := COALESCE(p_board_size, 5);
+    v_variant TEXT := CASE WHEN COALESCE(p_board_size, 5) = 10 THEN '10x10' ELSE '5x5' END;
     v_target INT := CASE WHEN COALESCE(p_board_size, 5) = 10 THEN 10 ELSE 5 END;
     v_attempts INT := 0;
 BEGIN
     IF v_board_sz NOT IN (5, 10) THEN
         v_board_sz := 5;
+        v_variant := '5x5';
         v_target := 5;
     END IF;
 
@@ -145,8 +159,8 @@ BEGIN
         END IF;
     END LOOP;
 
-    INSERT INTO games (room_code, status, target_lines, board_size)
-    VALUES (v_room_code, 'waiting', v_target, v_board_sz)
+    INSERT INTO games (room_code, status, target_lines, board_size, variant)
+    VALUES (v_room_code, 'waiting', v_target, v_board_sz, v_variant)
     RETURNING id INTO v_game_id;
 
     INSERT INTO players (game_id, session_id, display_name, player_number, is_ready, connected, last_seen_at)
@@ -159,13 +173,14 @@ BEGIN
         'player_id', v_player_id,
         'player_number', 1,
         'board_size', v_board_sz,
+        'variant', v_variant,
         'target_lines', v_target,
         'status', 'waiting'
     );
 END;
 $$;
 
--- 5. CREATE GAME OVERLOAD (2 arguments for backwards compatibility)
+-- Overload for backwards compatibility
 CREATE OR REPLACE FUNCTION create_game(
     p_session_id TEXT,
     p_display_name TEXT
@@ -179,7 +194,7 @@ BEGIN
 END;
 $$;
 
--- 6. SET GAME MODE RPC (Host switches mode in lobby)
+-- 5. SET GAME MODE RPC
 CREATE OR REPLACE FUNCTION set_game_mode(
     p_game_id UUID,
     p_session_id TEXT,
@@ -192,6 +207,7 @@ AS $$
 DECLARE
     v_game RECORD;
     v_player RECORD;
+    v_variant TEXT;
     v_target INT;
 BEGIN
     IF p_board_size NOT IN (5, 10) THEN
@@ -212,10 +228,12 @@ BEGIN
         RAISE EXCEPTION 'Only the host can change game mode';
     END IF;
 
+    v_variant := CASE WHEN p_board_size = 10 THEN '10x10' ELSE '5x5' END;
     v_target := CASE WHEN p_board_size = 10 THEN 10 ELSE 5 END;
 
     UPDATE games
     SET board_size = p_board_size,
+        variant = v_variant,
         target_lines = v_target,
         updated_at = NOW()
     WHERE id = p_game_id;
@@ -232,76 +250,13 @@ BEGIN
         'success', TRUE,
         'game_id', v_game.id,
         'board_size', p_board_size,
+        'variant', v_variant,
         'target_lines', v_target
     );
 END;
 $$;
 
--- 7. JOIN GAME RPC
-CREATE OR REPLACE FUNCTION join_game(
-    p_room_code TEXT,
-    p_session_id TEXT,
-    p_display_name TEXT
-)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    v_game RECORD;
-    v_player_id UUID;
-    v_existing_player RECORD;
-    v_player_count INT;
-BEGIN
-    SELECT * INTO v_game FROM games WHERE UPPER(room_code) = UPPER(p_room_code);
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Room % not found', p_room_code;
-    END IF;
-
-    SELECT * INTO v_existing_player FROM players WHERE game_id = v_game.id AND session_id = p_session_id;
-    IF FOUND THEN
-        UPDATE players SET connected = TRUE, last_seen_at = NOW() WHERE id = v_existing_player.id;
-        RETURN jsonb_build_object(
-            'game_id', v_game.id,
-            'room_code', v_game.room_code,
-            'player_id', v_existing_player.id,
-            'player_number', v_existing_player.player_number,
-            'board_size', v_game.board_size,
-            'target_lines', v_game.target_lines,
-            'status', v_game.status,
-            'is_reconnect', TRUE
-        );
-    END IF;
-
-    IF v_game.status IN ('completed', 'abandoned') THEN
-        RAISE EXCEPTION 'Game % has already ended', p_room_code;
-    END IF;
-
-    SELECT COUNT(*) INTO v_player_count FROM players WHERE game_id = v_game.id;
-    IF v_player_count >= 2 THEN
-        RAISE EXCEPTION 'Room % is already full (2 players maximum)', p_room_code;
-    END IF;
-
-    INSERT INTO players (game_id, session_id, display_name, player_number, is_ready, connected, last_seen_at)
-    VALUES (v_game.id, p_session_id, COALESCE(NULLIF(TRIM(p_display_name), ''), 'Challenger'), 2, FALSE, TRUE, NOW())
-    RETURNING id INTO v_player_id;
-
-    UPDATE games SET status = 'ready', updated_at = NOW() WHERE id = v_game.id;
-
-    RETURN jsonb_build_object(
-        'game_id', v_game.id,
-        'room_code', v_game.room_code,
-        'player_id', v_player_id,
-        'player_number', 2,
-        'board_size', v_game.board_size,
-        'target_lines', v_game.target_lines,
-        'status', 'ready',
-        'is_reconnect', FALSE
-    );
-END;
-$$;
-
--- 8. SET PLAYER BOARD RPC (Validates either 25 or 100 numbers matching game board_size)
+-- 6. SET PLAYER BOARD RPC (Validates 25 or 100 numbers based on games.variant / board_size)
 CREATE OR REPLACE FUNCTION set_player_board(
     p_game_id UUID,
     p_session_id TEXT,
@@ -314,72 +269,97 @@ AS $$
 DECLARE
     v_player RECORD;
     v_game RECORD;
+    v_variant TEXT;
     v_expected_count INT;
     v_num_count INT;
     v_distinct_count INT;
-    v_other_ready BOOLEAN;
-    v_p1_id UUID;
+    v_out_of_range_count INT;
     v_all_ready BOOLEAN := FALSE;
+    v_first_turn_id UUID := NULL;
+    v_p1 RECORD;
+    v_p2 RECORD;
 BEGIN
-    SELECT * INTO v_game FROM games WHERE id = p_game_id;
+    SELECT * INTO v_game FROM games WHERE id = p_game_id FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Game not found';
     END IF;
 
-    SELECT * INTO v_player FROM players WHERE game_id = p_game_id AND session_id = p_session_id;
+    IF v_game.status NOT IN ('waiting', 'ready') THEN
+        RAISE EXCEPTION 'Cannot set board while game is %', v_game.status;
+    END IF;
+
+    SELECT * INTO v_player FROM players WHERE game_id = p_game_id AND session_id = p_session_id FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Player not found in this game';
     END IF;
 
-    v_expected_count := v_game.board_size * v_game.board_size;
+    v_variant := COALESCE(v_game.variant, CASE WHEN v_game.board_size = 10 THEN '10x10' ELSE '5x5' END);
+    v_expected_count := CASE WHEN v_variant = '10x10' OR v_game.board_size = 10 THEN 100 ELSE 25 END;
 
-    IF p_board IS NULL OR jsonb_array_length(p_board) <> v_expected_count THEN
-        RAISE EXCEPTION 'Board must contain exactly % numbers', v_expected_count;
+    IF p_board IS NULL OR jsonb_typeof(p_board) <> 'array' THEN
+        RAISE EXCEPTION 'Board must be a JSON array of % numbers', v_expected_count;
     END IF;
 
-    SELECT COUNT(*), COUNT(DISTINCT (val::INT))
-    INTO v_num_count, v_distinct_count
-    FROM jsonb_array_elements_text(p_board) AS val
-    WHERE (val::INT) >= 1 AND (val::INT) <= v_expected_count;
+    v_num_count := jsonb_array_length(p_board);
+    IF v_num_count <> v_expected_count THEN
+        RAISE EXCEPTION 'Board must contain exactly % numbers (received %)', v_expected_count, v_num_count;
+    END IF;
 
-    IF v_num_count <> v_expected_count OR v_distinct_count <> v_expected_count THEN
-        RAISE EXCEPTION 'Board must contain all numbers from 1 to % with no duplicates', v_expected_count;
+    SELECT COUNT(DISTINCT val::INT) INTO v_distinct_count
+    FROM jsonb_array_elements_text(p_board) AS val;
+
+    IF v_distinct_count <> v_expected_count THEN
+        RAISE EXCEPTION 'Board contains duplicate numbers. All % numbers must be unique.', v_expected_count;
+    END IF;
+
+    SELECT COUNT(*) INTO v_out_of_range_count
+    FROM jsonb_array_elements_text(p_board) AS val
+    WHERE val::INT < 1 OR val::INT > v_expected_count;
+
+    IF v_out_of_range_count > 0 THEN
+        RAISE EXCEPTION 'All numbers must be between 1 and %', v_expected_count;
     END IF;
 
     UPDATE players
-    SET board = p_board, is_ready = TRUE, last_seen_at = NOW()
+    SET board = p_board,
+        is_ready = TRUE,
+        last_seen_at = NOW()
     WHERE id = v_player.id;
 
-    SELECT is_ready INTO v_other_ready
-    FROM players
-    WHERE game_id = p_game_id AND id <> v_player.id;
+    SELECT * INTO v_p1 FROM players WHERE game_id = p_game_id AND player_number = 1;
+    SELECT * INTO v_p2 FROM players WHERE game_id = p_game_id AND player_number = 2;
 
-    IF v_other_ready = TRUE THEN
+    IF v_p1.is_ready = TRUE AND v_p2.is_ready = TRUE THEN
         v_all_ready := TRUE;
-        SELECT id INTO v_p1_id FROM players WHERE game_id = p_game_id AND player_number = 1;
+        v_first_turn_id := v_p1.id;
 
         UPDATE games
         SET status = 'playing',
-            current_turn_player_id = v_p1_id,
+            current_turn_player_id = v_first_turn_id,
             updated_at = NOW()
         WHERE id = p_game_id;
     END IF;
 
     RETURN jsonb_build_object(
         'success', TRUE,
+        'player_id', v_player.id,
         'is_ready', TRUE,
         'all_ready', v_all_ready,
-        'game_status', CASE WHEN v_all_ready THEN 'playing' ELSE v_game.status END,
-        'current_turn_player_id', CASE WHEN v_all_ready THEN v_p1_id ELSE NULL END
+        'current_turn_player_id', v_first_turn_id,
+        'status', CASE WHEN v_all_ready THEN 'playing' ELSE v_game.status END,
+        'board_size', v_game.board_size,
+        'variant', v_variant
     );
 END;
 $$;
 
--- 9. CALL NUMBER RPC
+-- 7. VARIANT-AWARE CALL NUMBER RPC (Supports both 5-param and 3-param)
 CREATE OR REPLACE FUNCTION call_number(
-    p_game_id UUID,
-    p_session_id TEXT,
-    p_number INT
+    p_game_id              UUID,
+    p_session_id           TEXT,
+    p_number               INT,
+    p_player_id            TEXT DEFAULT NULL,
+    p_opponent_player_id   TEXT DEFAULT NULL
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -389,6 +369,8 @@ DECLARE
     v_game RECORD;
     v_caller RECORD;
     v_opponent RECORD;
+    v_variant TEXT;
+    v_max_number INT;
     v_next_seq INT;
     v_all_called INT[];
     v_caller_lines INT;
@@ -400,9 +382,8 @@ DECLARE
     v_p2 RECORD;
     v_p1_lines INT;
     v_p2_lines INT;
-    v_variant TEXT;
-    v_max_number INT;
 BEGIN
+    -- 1. Validate Game
     SELECT * INTO v_game FROM games WHERE id = p_game_id FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Game not found';
@@ -412,16 +393,18 @@ BEGIN
         RAISE EXCEPTION 'Game is not in playing state (current: %)', v_game.status;
     END IF;
 
+    -- 2. Validate Caller
     SELECT * INTO v_caller FROM players WHERE game_id = p_game_id AND session_id = p_session_id;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Player not found';
     END IF;
 
+    -- 3. Strict Turn Enforcement
     IF v_game.current_turn_player_id <> v_caller.id THEN
         RAISE EXCEPTION 'It is not your turn to call a number';
     END IF;
 
-    -- Variant-Aware Number Range Validation
+    -- 4. Variant-Aware Number Range Validation
     v_variant := COALESCE(v_game.variant, CASE WHEN v_game.board_size = 10 THEN '10x10' ELSE '5x5' END);
     v_max_number := CASE WHEN v_variant = '10x10' OR v_game.board_size = 10 THEN 100 ELSE 25 END;
 
@@ -429,24 +412,31 @@ BEGIN
         RAISE EXCEPTION 'Called number must be between 1 and %', v_max_number;
     END IF;
 
+    -- 5. Duplicate Prevention
     IF EXISTS (SELECT 1 FROM called_numbers WHERE game_id = p_game_id AND number = p_number) THEN
         RAISE EXCEPTION 'Number % has already been called in this game', p_number;
     END IF;
 
+    -- Find Opponent
     SELECT * INTO v_opponent FROM players WHERE game_id = p_game_id AND id <> v_caller.id;
 
+    -- Next Sequence
     SELECT COALESCE(MAX(sequence), 0) + 1 INTO v_next_seq FROM called_numbers WHERE game_id = p_game_id;
 
+    -- Record Call
     INSERT INTO called_numbers (game_id, number, called_by, sequence)
     VALUES (p_game_id, p_number, v_caller.id, v_next_seq);
 
+    -- Gather all calls
     SELECT ARRAY_AGG(number ORDER BY sequence ASC) INTO v_all_called
     FROM called_numbers
     WHERE game_id = p_game_id;
 
+    -- Fetch P1 & P2
     SELECT * INTO v_p1 FROM players WHERE game_id = p_game_id AND player_number = 1;
     SELECT * INTO v_p2 FROM players WHERE game_id = p_game_id AND player_number = 2;
 
+    -- Calculate completed lines (strikes)
     v_p1_lines := calculate_lines(v_p1.board, v_all_called);
     v_p2_lines := calculate_lines(v_p2.board, v_all_called);
 
@@ -458,6 +448,7 @@ BEGIN
         v_opponent_lines := v_p1_lines;
     END IF;
 
+    -- Win Condition: Target lines (10 for 10x10, 5 for 5x5)
     IF v_caller_lines >= v_game.target_lines THEN
         v_winner_id := v_caller.id;
         v_is_game_over := TRUE;
@@ -474,7 +465,38 @@ BEGIN
             updated_at = NOW()
         WHERE id = p_game_id;
         v_next_turn_id := NULL;
+
+        -- Leaderboard tracking (if upsert_player_stats exists)
+        BEGIN
+            IF p_player_id IS NOT NULL THEN
+                DECLARE
+                    v_winner_player_id TEXT;
+                    v_loser_player_id  TEXT;
+                    v_winner_display   TEXT;
+                    v_loser_display    TEXT;
+                BEGIN
+                    IF v_winner_id = v_caller.id THEN
+                        v_winner_player_id := p_player_id;
+                        v_loser_player_id  := p_opponent_player_id;
+                        v_winner_display   := v_caller.display_name;
+                        v_loser_display    := v_opponent.display_name;
+                    ELSE
+                        v_winner_player_id := p_opponent_player_id;
+                        v_loser_player_id  := p_player_id;
+                        v_winner_display   := v_opponent.display_name;
+                        v_loser_display    := v_caller.display_name;
+                    END IF;
+
+                    PERFORM upsert_player_stats(v_winner_player_id, v_winner_display, v_variant, TRUE);
+                    PERFORM upsert_player_stats(v_loser_player_id, v_loser_display, v_variant, FALSE);
+                EXCEPTION WHEN OTHERS THEN
+                    -- Non-fatal if leaderboard function not present
+                    NULL;
+                END;
+            END IF;
+        END;
     ELSE
+        -- Strict Alternating Turns
         v_next_turn_id := v_opponent.id;
         UPDATE games
         SET current_turn_player_id = v_next_turn_id,
@@ -492,12 +514,29 @@ BEGIN
         'is_game_over', v_is_game_over,
         'p1_lines', v_p1_lines,
         'p2_lines', v_p2_lines,
-        'all_called_count', cardinality(v_all_called)
+        'all_called_count', cardinality(v_all_called),
+        'variant', v_variant,
+        'target_lines', v_game.target_lines
     );
 END;
 $$;
 
--- 10. GET GAME STATE RPC (Includes board_size and target_lines)
+-- Overload for legacy 3-parameter callers
+CREATE OR REPLACE FUNCTION call_number(
+    p_game_id UUID,
+    p_session_id TEXT,
+    p_number INT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    RETURN call_number(p_game_id, p_session_id, p_number, NULL, NULL);
+END;
+$$;
+
+-- 8. GET GAME STATE RPC (Includes variant, board_size, target_lines)
 CREATE OR REPLACE FUNCTION get_game_state(
     p_game_id UUID,
     p_session_id TEXT
@@ -515,11 +554,14 @@ DECLARE
     v_all_called_nums INT[];
     v_p1_lines INT := 0;
     v_p2_lines INT := 0;
+    v_variant TEXT;
 BEGIN
     SELECT * INTO v_game FROM games WHERE id = p_game_id;
     IF NOT FOUND THEN
         RETURN NULL;
     END IF;
+
+    v_variant := COALESCE(v_game.variant, CASE WHEN v_game.board_size = 10 THEN '10x10' ELSE '5x5' END);
 
     SELECT * INTO v_caller FROM players WHERE game_id = p_game_id AND session_id = p_session_id;
     SELECT * INTO v_p1 FROM players WHERE game_id = p_game_id AND player_number = 1;
@@ -558,6 +600,7 @@ BEGIN
             'winner_id', v_game.winner_id,
             'target_lines', v_game.target_lines,
             'board_size', v_game.board_size,
+            'variant', v_variant,
             'created_at', v_game.created_at
         ),
         'player', CASE WHEN v_caller.id IS NOT NULL THEN jsonb_build_object(
@@ -596,63 +639,12 @@ BEGIN
 END;
 $$;
 
--- 11. REMATCH GAME RPC
-CREATE OR REPLACE FUNCTION rematch_game(
-    p_game_id UUID,
-    p_session_id TEXT
-)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    v_game RECORD;
-    v_player RECORD;
-BEGIN
-    SELECT * INTO v_game FROM games WHERE id = p_game_id FOR UPDATE;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Game not found';
-    END IF;
-
-    SELECT * INTO v_player FROM players WHERE game_id = p_game_id AND session_id = p_session_id;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Player not found in this game';
-    END IF;
-
-    DELETE FROM called_numbers WHERE game_id = p_game_id;
-
-    UPDATE games
-    SET status = 'ready',
-        winner_id = NULL,
-        current_turn_player_id = NULL,
-        updated_at = NOW()
-    WHERE id = p_game_id;
-
-    UPDATE players
-    SET is_ready = FALSE,
-        board = NULL,
-        last_seen_at = NOW()
-    WHERE game_id = p_game_id;
-
-    RETURN jsonb_build_object(
-        'success', TRUE,
-        'game_id', v_game.id,
-        'room_code', v_game.room_code,
-        'board_size', v_game.board_size,
-        'target_lines', v_game.target_lines,
-        'status', 'ready'
-    );
-END;
-$$;
-
--- 12. PERMISSIONS
-GRANT USAGE ON SCHEMA public TO anon, authenticated;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+-- 9. PERMISSIONS
 GRANT EXECUTE ON FUNCTION create_game(TEXT, TEXT, INT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION create_game(TEXT, TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION set_game_mode(UUID, TEXT, INT) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION join_game(TEXT, TEXT, TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION set_player_board(UUID, TEXT, JSONB) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION call_number(UUID, TEXT, INT, TEXT, TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION call_number(UUID, TEXT, INT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION calculate_lines(JSONB, INT[]) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_game_state(UUID, TEXT) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION rematch_game(UUID, TEXT) TO anon, authenticated;

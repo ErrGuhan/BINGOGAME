@@ -1,6 +1,8 @@
 export type GameStatus = 'waiting' | 'ready' | 'playing' | 'completed' | 'abandoned';
 export type BoardSize = 5 | 10;
 
+export type GameVariant = '5x5' | '10x10';
+
 export interface Game {
   id: string;
   room_code: string;
@@ -9,6 +11,7 @@ export interface Game {
   winner_id: string | null;
   target_lines: number;
   board_size: BoardSize;
+  variant?: GameVariant;
   created_at: string;
 }
 

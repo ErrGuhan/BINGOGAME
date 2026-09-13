@@ -35,6 +35,7 @@ CREATE TABLE games (
     winner_id UUID,
     target_lines INT NOT NULL DEFAULT 5,
     board_size INT NOT NULL DEFAULT 5 CHECK (board_size IN (5, 10)),
+    variant TEXT NOT NULL DEFAULT '5x5' CHECK (variant IN ('5x5', '10x10')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -140,8 +141,8 @@ BEGIN
         END IF;
     END LOOP;
 
-    INSERT INTO games (room_code, status, target_lines, board_size)
-    VALUES (v_room_code, 'waiting', v_target, v_board_sz)
+    INSERT INTO games (room_code, status, target_lines, board_size, variant)
+    VALUES (v_room_code, 'waiting', v_target, v_board_sz, CASE WHEN v_board_sz = 10 THEN '10x10' ELSE '5x5' END)
     RETURNING id INTO v_game_id;
 
     INSERT INTO players (game_id, session_id, display_name, player_number, is_ready, connected, last_seen_at)
@@ -154,6 +155,7 @@ BEGIN
         'player_id', v_player_id,
         'player_number', 1,
         'board_size', v_board_sz,
+        'variant', CASE WHEN v_board_sz = 10 THEN '10x10' ELSE '5x5' END,
         'target_lines', v_target,
         'status', 'waiting'
     );
@@ -214,6 +216,7 @@ BEGIN
     -- Update game
     UPDATE games
     SET board_size = p_board_size,
+        variant = CASE WHEN p_board_size = 10 THEN '10x10' ELSE '5x5' END,
         target_lines = v_target,
         updated_at = NOW()
     WHERE id = p_game_id;
@@ -232,6 +235,7 @@ BEGIN
         'success', TRUE,
         'game_id', v_game.id,
         'board_size', p_board_size,
+        'variant', CASE WHEN p_board_size = 10 THEN '10x10' ELSE '5x5' END,
         'target_lines', v_target
     );
 END;
@@ -506,6 +510,8 @@ DECLARE
     v_p2 RECORD;
     v_p1_lines INT;
     v_p2_lines INT;
+    v_variant TEXT;
+    v_max_number INT;
 BEGIN
     -- 1. Validate Game
     SELECT * INTO v_game FROM games WHERE id = p_game_id FOR UPDATE;
@@ -528,9 +534,12 @@ BEGIN
         RAISE EXCEPTION 'It is not your turn to call a number';
     END IF;
 
-    -- 4. Validate Number Range
-    IF p_number < 1 OR p_number > (v_game.board_size * v_game.board_size) THEN
-        RAISE EXCEPTION 'Called number must be between 1 and %', (v_game.board_size * v_game.board_size);
+    -- 4. Variant-Aware Number Range Validation
+    v_variant := COALESCE(v_game.variant, CASE WHEN v_game.board_size = 10 THEN '10x10' ELSE '5x5' END);
+    v_max_number := CASE WHEN v_variant = '10x10' OR v_game.board_size = 10 THEN 100 ELSE 25 END;
+
+    IF p_number < 1 OR p_number > v_max_number THEN
+        RAISE EXCEPTION 'Called number must be between 1 and %', v_max_number;
     END IF;
 
     -- 5. Duplicate Prevention

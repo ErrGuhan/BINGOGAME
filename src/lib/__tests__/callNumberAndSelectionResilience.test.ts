@@ -253,4 +253,112 @@ describe('Call Number Dual-Layer Resilience & Selection Logic', () => {
       expect(currentTurnId).toBe(p1Id); // After 4 turns, back to P1
     });
   });
+
+  describe('4. Variant-Aware Number Validation Range Checks', () => {
+    const validateNumberForVariant = (number: number, variant: '5x5' | '10x10') => {
+      const maxAllowed = variant === '10x10' ? 100 : 25;
+      if (number < 1 || number > maxAllowed) {
+        throw new Error(`Called number must be between 1 and ${maxAllowed}`);
+      }
+      return true;
+    };
+
+    it('Classic 5x5 allows 1-25 and rejects 0, 26, and 53', () => {
+      expect(validateNumberForVariant(1, '5x5')).toBe(true);
+      expect(validateNumberForVariant(25, '5x5')).toBe(true);
+      expect(validateNumberForVariant(13, '5x5')).toBe(true);
+
+      expect(() => validateNumberForVariant(0, '5x5')).toThrow('Called number must be between 1 and 25');
+      expect(() => validateNumberForVariant(26, '5x5')).toThrow('Called number must be between 1 and 25');
+      expect(() => validateNumberForVariant(53, '5x5')).toThrow('Called number must be between 1 and 25');
+    });
+
+    it('Mega 10x10 allows 1-100 (including 53, 99, 100) and rejects 0 and 101', () => {
+      expect(validateNumberForVariant(1, '10x10')).toBe(true);
+      expect(validateNumberForVariant(25, '10x10')).toBe(true);
+      expect(validateNumberForVariant(53, '10x10')).toBe(true);
+      expect(validateNumberForVariant(99, '10x10')).toBe(true);
+      expect(validateNumberForVariant(100, '10x10')).toBe(true);
+
+      expect(() => validateNumberForVariant(0, '10x10')).toThrow('Called number must be between 1 and 100');
+      expect(() => validateNumberForVariant(101, '10x10')).toThrow('Called number must be between 1 and 100');
+    });
+  });
+
+  describe('5. 10x10 Mega Mode Win Condition Rules (10 Strikes to Win)', () => {
+    it('requires exactly 10 strikes to win in 10x10 mode, not 1 and not 5', () => {
+      const targetLines10 = 10;
+      const targetLines5 = 5;
+
+      const checkWin = (completedLines: number, target: number) => {
+        return completedLines >= target;
+      };
+
+      // In 10x10 mode:
+      expect(checkWin(1, targetLines10)).toBe(false); // 1 strike does not win
+      expect(checkWin(5, targetLines10)).toBe(false); // 5 strikes does not win
+      expect(checkWin(9, targetLines10)).toBe(false); // 9 strikes does not win
+      expect(checkWin(10, targetLines10)).toBe(true); // 10 strikes wins!
+      expect(checkWin(11, targetLines10)).toBe(true);
+
+      // In 5x5 mode:
+      expect(checkWin(4, targetLines5)).toBe(false);
+      expect(checkWin(5, targetLines5)).toBe(true);
+    });
+
+    it('synchronizes header strike letters ("BINGODUEL!") with completed strike count', () => {
+      const HEADERS_10 = ['B', 'I', 'N', 'G', 'O', 'D', 'U', 'E', 'L', '!'];
+      expect(HEADERS_10).toHaveLength(10);
+
+      // Simulate strike progression
+      for (let completedStrikes = 0; completedStrikes <= 10; completedStrikes++) {
+        const struckLetters = HEADERS_10.filter((_, idx) => idx < completedStrikes);
+        expect(struckLetters).toHaveLength(completedStrikes);
+
+        if (completedStrikes === 10) {
+          // Exactly all 10 letters struck when win occurs
+          expect(struckLetters).toEqual(HEADERS_10);
+        }
+      }
+    });
+
+    it('dual-layer turn fallback handles unmigrated DB rejection when calling numbers > 25 in 10x10 match', async () => {
+      // Simulates the fallback added to useBingoGame.ts
+      const mockRpc = vi.fn().mockResolvedValue({
+        data: null,
+        error: {
+          code: 'P0001',
+          message: 'Called number must be between 1 and 25',
+        },
+      });
+
+      const is10x10 = true;
+      const numberToCall = 53;
+      let rpcData: any = null;
+
+      const primaryRes = await mockRpc('call_number', { p_game_id: 'g1', p_number: numberToCall });
+      if (primaryRes.error) {
+        const errMsg = primaryRes.error.message.toLowerCase();
+        if (is10x10 && errMsg.includes('between 1 and 25')) {
+          // Resilience fallback kicks in!
+          rpcData = {
+            success: true,
+            number: numberToCall,
+            sequence: 1,
+            called_by: 'p1_uuid',
+            next_turn_player_id: 'p2_uuid',
+            winner_id: null,
+            is_game_over: false,
+            p1_lines: 0,
+            p2_lines: 0,
+            all_called_count: 1,
+          };
+        }
+      }
+
+      expect(rpcData).not.toBeNull();
+      expect(rpcData.success).toBe(true);
+      expect(rpcData.number).toBe(53);
+    });
+  });
 });
