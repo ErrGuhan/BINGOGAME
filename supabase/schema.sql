@@ -529,9 +529,10 @@ BEGIN
         RAISE EXCEPTION 'Player not found';
     END IF;
 
-    -- 3. Strict Turn Enforcement
-    IF v_game.current_turn_player_id <> v_caller.id THEN
-        RAISE EXCEPTION 'It is not your turn to call a number';
+    -- 3. Strict Turn Enforcement (Rejects when NULL or when caller does not match)
+    IF v_game.current_turn_player_id IS NULL OR v_game.current_turn_player_id <> v_caller.id THEN
+        RAISE EXCEPTION 'It is not your turn to call a number (current turn: %, caller: %)',
+            COALESCE(v_game.current_turn_player_id::TEXT, 'none'), v_caller.id::TEXT;
     END IF;
 
     -- 4. Variant-Aware Number Range Validation
@@ -547,8 +548,14 @@ BEGIN
         RAISE EXCEPTION 'Number % has already been called in this game', p_number;
     END IF;
 
-    -- Find Opponent
-    SELECT * INTO v_opponent FROM players WHERE game_id = p_game_id AND id <> v_caller.id;
+    -- Find Opponent (Deterministic by player_number 1 <-> 2)
+    SELECT * INTO v_opponent FROM players WHERE game_id = p_game_id AND player_number = (3 - v_caller.player_number);
+    IF v_opponent.id IS NULL THEN
+        SELECT * INTO v_opponent FROM players WHERE game_id = p_game_id AND id <> v_caller.id LIMIT 1;
+    END IF;
+    IF v_opponent.id IS NULL THEN
+        RAISE EXCEPTION 'Opponent player not found in game %', p_game_id;
+    END IF;
 
     -- Determine Next Sequence
     SELECT COALESCE(MAX(sequence), 0) + 1 INTO v_next_seq FROM called_numbers WHERE game_id = p_game_id;

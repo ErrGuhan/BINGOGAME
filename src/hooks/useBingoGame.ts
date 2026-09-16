@@ -37,6 +37,7 @@ export function useBingoGame(initialRoomCode?: string) {
   const p2Ref = useRef<Player | null>(null);
   const playerRef = useRef<Player | null>(null);
   const rematchStatusRef = useRef(rematchStatus);
+  const calledNumbersRef = useRef<CalledNumber[]>([]);
 
   // Reliable session getter
   const getSession = useCallback(() => {
@@ -66,6 +67,10 @@ export function useBingoGame(initialRoomCode?: string) {
     rematchStatusRef.current = rematchStatus;
   }, [rematchStatus]);
 
+  useEffect(() => {
+    calledNumbersRef.current = calledNumbers;
+  }, [calledNumbers]);
+
   // Derived state
   const isHost = Boolean(player?.player_number === 1);
   const opponent = isHost ? p2 : p1;
@@ -73,7 +78,9 @@ export function useBingoGame(initialRoomCode?: string) {
   const activeTurnPlayerId = game?.current_turn_player_id
     ? game.current_turn_player_id
     : game?.status === 'playing'
-    ? p1?.id || null
+    ? (calledNumbers.length === 0
+        ? p1?.id || null
+        : (calledNumbers[calledNumbers.length - 1]?.called_by === p1?.id ? p2?.id : p1?.id) || null)
     : null;
   const isMyTurn = Boolean(game?.status === 'playing' && player?.id && activeTurnPlayerId === player.id);
 
@@ -123,10 +130,36 @@ export function useBingoGame(initialRoomCode?: string) {
       const resolvedVariant: GameVariant = dbVariant || (resolvedBoardSize === 10 ? '10x10' : '5x5');
       const resolvedTarget = resolvedBoardSize === 10 ? 10 : 5;
 
-      // Ensure current_turn_player_id is never wiped to null during 'playing' state
-      const resolvedTurnId = snapshot.game.status === 'playing'
-        ? (snapshot.game.current_turn_player_id || prev?.current_turn_player_id || snapshot.p1?.id || null)
-        : snapshot.game.current_turn_player_id;
+      // Ensure current_turn_player_id is never wiped to null during 'playing' state,
+      // and prevent a lagging or unmigrated server snapshot from reverting a locally confirmed turn.
+      let resolvedTurnId = snapshot.game.current_turn_player_id;
+      if (snapshot.game.status === 'playing') {
+        const localCalls = calledNumbersRef.current;
+        const p1Id = snapshot.p1?.id || p1Ref.current?.id || null;
+        const p2Id = snapshot.p2?.id || p2Ref.current?.id || null;
+
+        if (localCalls.length > 0) {
+          const latestCall = localCalls[localCalls.length - 1];
+          // In strict turn alternation, the player who called CANNOT be the next turn player
+          const alternatingNextId = latestCall.called_by === p1Id ? p2Id : p1Id;
+
+          // If the server snapshot is lagging behind our local calls, or if the server snapshot
+          // incorrectly still holds the caller's ID, preserve alternatingNextId
+          const serverCallCount = snapshot.called_numbers?.length ?? 0;
+          if (
+            !snapshot.game.current_turn_player_id ||
+            snapshot.game.current_turn_player_id === latestCall.called_by ||
+            serverCallCount < localCalls.length
+          ) {
+            resolvedTurnId = alternatingNextId || prev?.current_turn_player_id || null;
+          } else {
+            resolvedTurnId = snapshot.game.current_turn_player_id;
+          }
+        } else {
+          // No calls made yet: Player 1 (Host) starts
+          resolvedTurnId = snapshot.game.current_turn_player_id || prev?.current_turn_player_id || p1Id || null;
+        }
+      }
 
       return {
         ...snapshot.game,
@@ -203,6 +236,7 @@ export function useBingoGame(initialRoomCode?: string) {
     // If in rematch epoch and server confirms 0 calls, clear calls.
     if (matchEpochRef.current > 1 && snapshot.called_numbers?.length === 0) {
       setCalledNumbers([]);
+      calledNumbersRef.current = [];
     } else if (snapshot.called_numbers) {
       // Merge server called numbers with locally confirmed calls using Map deduplication
       setCalledNumbers(prev => {
@@ -213,7 +247,9 @@ export function useBingoGame(initialRoomCode?: string) {
         for (const c of snapshot.called_numbers) {
           callMap.set(c.number, c);
         }
-        return Array.from(callMap.values()).sort((a, b) => a.sequence - b.sequence);
+        const merged = Array.from(callMap.values()).sort((a, b) => a.sequence - b.sequence);
+        calledNumbersRef.current = merged;
+        return merged;
       });
     }
 
@@ -295,7 +331,9 @@ export function useBingoGame(initialRoomCode?: string) {
       // Immediately fold into authoritative called numbers
       setCalledNumbers(prev => {
         if (prev.some(c => c.number === newCall.number)) return prev;
-        return [...prev, newCall];
+        const updated = [...prev, newCall];
+        calledNumbersRef.current = updated;
+        return updated;
       });
 
       // Clear optimistic call now that authoritative state has folded it
@@ -305,9 +343,16 @@ export function useBingoGame(initialRoomCode?: string) {
       setP2(prev => prev ? { ...prev, lines_completed: call.p2_lines } : null);
 
       // Strict turn alternation: determine next turn ID
-      const p1IdVal = p1Ref.current?.id;
-      const p2IdVal = p2Ref.current?.id;
-      const oppositePlayerId = call.called_by === p1IdVal ? p2IdVal : p1IdVal;
+      const p1IdVal = p1Ref.current?.id || p1?.id;
+      const p2IdVal = p2Ref.current?.id || p2?.id;
+      let oppositePlayerId: string | null = null;
+      if (p1IdVal && p2IdVal) {
+        oppositePlayerId = call.called_by === p1IdVal ? p2IdVal : p1IdVal;
+      } else if (playerRef.current?.id) {
+        oppositePlayerId = call.called_by === playerRef.current.id
+          ? (opponent?.id || p2IdVal || p1IdVal || null)
+          : playerRef.current.id;
+      }
       const nextTurnId = call.is_game_over
         ? null
         : (call.next_turn_player_id || oppositePlayerId || null);
@@ -1058,7 +1103,10 @@ export function useBingoGame(initialRoomCode?: string) {
 
   // ACTION: Call Number (Strict Alternating Turns & Authoritative State Folding)
   const callNumber = useCallback(async (number: number) => {
-    if (!game?.id || !isMyTurn) return;
+    if (!game?.id || !isMyTurn) {
+      console.warn(`[BingoDuel:Turn] Blocked call attempt: not this player's turn (player: ${player?.id}, activeTurn: ${activeTurnPlayerId})`);
+      return;
+    }
     if (calledNumbers.some(c => c.number === number)) return;
 
     // Determine variant & max allowed number from authoritative game record
@@ -1143,7 +1191,9 @@ export function useBingoGame(initialRoomCode?: string) {
                 isGameOver = true;
               }
 
-              const nextTurnId = isGameOver ? null : (callerIsP1 ? p2?.id : p1?.id) || null;
+              const nextTurnId = isGameOver
+                ? null
+                : (callerIsP1 ? (p2?.id || p2Ref.current?.id || opponent?.id) : (p1?.id || p1Ref.current?.id || opponent?.id)) || null;
 
               rpcData = {
                 success: true,
@@ -1192,7 +1242,9 @@ export function useBingoGame(initialRoomCode?: string) {
               isGameOver = true;
             }
 
-            const nextTurnId = isGameOver ? null : (callerIsP1 ? p2?.id : p1?.id) || null;
+            const nextTurnId = isGameOver
+              ? null
+              : (callerIsP1 ? (p2?.id || p2Ref.current?.id || opponent?.id) : (p1?.id || p1Ref.current?.id || opponent?.id)) || null;
 
             rpcData = {
               success: true,
@@ -1228,16 +1280,25 @@ export function useBingoGame(initialRoomCode?: string) {
 
       setCalledNumbers(prev => {
         if (prev.some(c => c.number === confirmedCall.number)) return prev;
-        return [...prev, confirmedCall];
+        const updated = [...prev, confirmedCall];
+        calledNumbersRef.current = updated;
+        return updated;
       });
 
       // 3. Clear optimistic call now that authoritative state has folded it in
       setOptimisticCalled(null);
 
       // 4. Strict turn alternation: determine next turn ID
-      const p1IdVal = p1?.id;
-      const p2IdVal = p2?.id;
-      const oppositePlayerId = result.called_by === p1IdVal ? p2IdVal : p1IdVal;
+      const p1IdVal = p1?.id || p1Ref.current?.id;
+      const p2IdVal = p2?.id || p2Ref.current?.id;
+      let oppositePlayerId: string | null = null;
+      if (p1IdVal && p2IdVal) {
+        oppositePlayerId = result.called_by === p1IdVal ? p2IdVal : p1IdVal;
+      } else if (player?.id) {
+        oppositePlayerId = result.called_by === player.id
+          ? (opponent?.id || p2IdVal || p1IdVal || null)
+          : player.id;
+      }
       const nextTurnId = result.is_game_over
         ? null
         : (result.next_turn_player_id || oppositePlayerId || null);
@@ -1282,7 +1343,7 @@ export function useBingoGame(initialRoomCode?: string) {
       sounds.playAlert();
       throw err; // Re-throw so caller UI (handleExecuteCall) knows the call failed
     }
-  }, [calledNumbers, game?.id, game?.variant, game?.board_size, game?.target_lines, getSession, isMyTurn, p1?.id, p1?.board, p2?.id, p2?.board, player?.id, player?.player_number, syncGameState]);
+  }, [activeTurnPlayerId, calledNumbers, game?.id, game?.variant, game?.board_size, game?.target_lines, getSession, isMyTurn, opponent?.id, p1?.id, p1?.board, p2?.id, p2?.board, player?.id, player?.player_number, syncGameState]);
 
   // ACTION: Claim Timeout Win
   const claimTimeoutWin = useCallback(async () => {
