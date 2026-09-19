@@ -166,7 +166,13 @@ export function getSessionId(): string {
   const KEY = 'bingo_duel_session_id';
   let id = safeGetItem(KEY);
   if (!id) {
-    id = 'usr_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+    // Use crypto.randomUUID() for CSPRNG-backed session IDs (122 bits entropy).
+    // Fall back to the legacy approach only if the Web Crypto API is unavailable.
+    try {
+      id = 'usr_' + crypto.randomUUID().replace(/-/g, '');
+    } catch {
+      id = 'usr_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+    }
     safeSetItem(KEY, id);
   }
   return id;

@@ -179,7 +179,7 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
             onBack();
           }}
           disabled={isReady}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high transition-all text-xs font-semibold border border-outline-variant disabled:opacity-40"
+          className="inline-flex items-center gap-1.5 px-3 min-h-[44px] rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high transition-all text-xs font-semibold border border-outline-variant disabled:opacity-40"
         >
           <ArrowLeftIcon className="w-3.5 h-3.5" />
           <span>Back</span>

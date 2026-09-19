@@ -21,6 +21,9 @@ export function useBingoGame(initialRoomCode?: string) {
   const [rematchStatus, setRematchStatus] = useState<'idle' | 'requesting' | 'received' | 'accepted' | 'declined'>('idle');
   const [rematchRequesterName, setRematchRequesterName] = useState<string | null>(null);
   const [channelStatus, setChannelStatus] = useState<'DISCONNECTED' | 'CONNECTING' | 'SUBSCRIBED' | 'ERROR' | 'CLOSED'>('DISCONNECTED');
+  // Incremented on rematch acceptance to force channel teardown+re-subscribe
+  // even when game.id/room_code haven't changed (same-row rematch).
+  const [channelEpoch, setChannelEpoch] = useState<number>(0);
 
   // External callbacks for rematch events — set by pages to avoid state-watching race conditions
   const onRematchDeclinedRef = useRef<(() => void) | null>(null);
@@ -75,13 +78,13 @@ export function useBingoGame(initialRoomCode?: string) {
   const isHost = Boolean(player?.player_number === 1);
   const opponent = isHost ? p2 : p1;
 
-  const activeTurnPlayerId = game?.current_turn_player_id
-    ? game.current_turn_player_id
-    : game?.status === 'playing'
-    ? (calledNumbers.length === 0
-        ? p1?.id || null
-        : (calledNumbers[calledNumbers.length - 1]?.called_by === p1?.id ? p2?.id : p1?.id) || null)
-    : null;
+  // Bug C fix: activeTurnPlayerId is derived EXCLUSIVELY from game.current_turn_player_id.
+  // The previous fallback that re-derived from calledNumbers caused transient "dual my-turn"
+  // states when both clients polled simultaneously and current_turn_player_id was briefly null.
+  const activeTurnPlayerId = game?.current_turn_player_id ?? null;
+  if (process.env.NODE_ENV === 'development' && game?.status === 'playing' && !activeTurnPlayerId) {
+    console.warn('[BingoDuel:Turn] current_turn_player_id is null during playing status — check server state.');
+  }
   const isMyTurn = Boolean(game?.status === 'playing' && player?.id && activeTurnPlayerId === player.id);
 
   const winner = game?.winner_id ? (game.winner_id === player?.id ? player : opponent) : null;
@@ -110,17 +113,11 @@ export function useBingoGame(initialRoomCode?: string) {
   const applySnapshot = useCallback((snapshot: GameStateSnapshot | null) => {
     if (!snapshot) return;
 
-    // Guard: Do not let stale "completed" snapshots pull players back after rematch acceptance or in higher epochs
-    if ((matchEpochRef.current > 1 || rematchStatusRef.current === 'accepted') && snapshot.game?.status === 'completed') {
-      return;
-    }
+    // Bug B fix: Removed the sweeping early-return that blocked ALL state updates during rematch.
+    // Instead we apply targeted clearing below when status transitions back to 'ready'.
 
     setGame(prev => {
       if (!snapshot.game) return null;
-      // Guard: do not let an unmigrated DB completed status override a ready/playing match in rematch
-      if (matchEpochRef.current > 1 && snapshot.game.status === 'completed' && prev?.status && prev.status !== 'completed') {
-        return prev;
-      }
 
       const dbBoardSize = snapshot.game.board_size;
       const dbVariant = snapshot.game.variant;
@@ -128,42 +125,26 @@ export function useBingoGame(initialRoomCode?: string) {
         ? dbBoardSize
         : (dbVariant === '10x10' ? 10 : (prev?.board_size === 10 ? 10 : 5));
       const resolvedVariant: GameVariant = dbVariant || (resolvedBoardSize === 10 ? '10x10' : '5x5');
-      const resolvedTarget = resolvedBoardSize === 10 ? 10 : 5;
+      const resolvedTarget = snapshot.game.target_lines || (resolvedBoardSize === 10 ? 10 : 5);
 
-      // Ensure current_turn_player_id is never wiped to null during 'playing' state,
-      // and prevent a lagging or unmigrated server snapshot from reverting a locally confirmed turn.
+      // Bug C fix: Use game.current_turn_player_id exclusively as the single source of truth
+      // for turn tracking. Do not re-derive from calledNumbers — that path creates transient
+      // "dual my-turn" states when both clients snapshot simultaneously.
+      // If the server value is null during 'playing' and we have a local value, preserve it
+      // only to handle the brief window between RPC confirmation and DB replication.
       let resolvedTurnId = snapshot.game.current_turn_player_id;
-      if (snapshot.game.status === 'playing') {
-        const localCalls = calledNumbersRef.current;
-        const p1Id = snapshot.p1?.id || p1Ref.current?.id || null;
-        const p2Id = snapshot.p2?.id || p2Ref.current?.id || null;
-
-        if (localCalls.length > 0) {
-          const latestCall = localCalls[localCalls.length - 1];
-          // In strict turn alternation, the player who called CANNOT be the next turn player
-          const alternatingNextId = latestCall.called_by === p1Id ? p2Id : p1Id;
-
-          // If the server snapshot is lagging behind our local calls, or if the server snapshot
-          // incorrectly still holds the caller's ID, preserve alternatingNextId
-          const serverCallCount = snapshot.called_numbers?.length ?? 0;
-          if (
-            !snapshot.game.current_turn_player_id ||
-            snapshot.game.current_turn_player_id === latestCall.called_by ||
-            serverCallCount < localCalls.length
-          ) {
-            resolvedTurnId = alternatingNextId || prev?.current_turn_player_id || null;
-          } else {
-            resolvedTurnId = snapshot.game.current_turn_player_id;
-          }
-        } else {
-          // No calls made yet: Player 1 (Host) starts
-          resolvedTurnId = snapshot.game.current_turn_player_id || prev?.current_turn_player_id || p1Id || null;
+      if (snapshot.game.status === 'playing' && !resolvedTurnId && prev?.current_turn_player_id) {
+        // Preserve the local turn only if the snapshot call count is lagging behind local
+        const serverCallCount = snapshot.called_numbers?.length ?? 0;
+        const localCallCount = calledNumbersRef.current.length;
+        if (serverCallCount < localCallCount) {
+          resolvedTurnId = prev.current_turn_player_id;
+          console.warn('[BingoDuel:Turn] Snapshot lagging behind local calls; preserving local turn ID.');
         }
       }
 
       return {
         ...snapshot.game,
-        status: (matchEpochRef.current > 1 && snapshot.game.status === 'completed' && prev?.status) ? prev.status : snapshot.game.status,
         board_size: resolvedBoardSize,
         variant: resolvedVariant,
         target_lines: resolvedTarget,
@@ -173,73 +154,84 @@ export function useBingoGame(initialRoomCode?: string) {
 
     if (snapshot.player) {
       const p = snapshot.player;
-      if (rematchStatusRef.current === 'accepted') {
-        setPlayer(prev => ({
+      setPlayer(prev => {
+        // Bug A fix: During 'playing' status, if we have a local board (from setBoard optimistic
+        // update), never let a snapshot overwrite it with null — the snapshot may arrive before
+        // the DB write is visible, leaving player.board=null and the screen transition gated.
+        const isPlaying = snapshot.game?.status === 'playing';
+        const hasLocalBoard = Boolean(prev?.board && prev.board.length > 0);
+        const snapBoard = p.board;
+
+        let resolvedBoard: number[] | null;
+        if (isPlaying && hasLocalBoard && !snapBoard) {
+          // Preserve the locally-confirmed board during play; snapshot lagging
+          resolvedBoard = prev!.board;
+        } else {
+          resolvedBoard = snapBoard || prev?.board || null;
+        }
+
+        // Bug B fix: During rematch epoch, if status is now 'ready', trust DB is_ready directly
+        // (reset to false) so we don't carry over stale 'true' from the previous game.
+        const isRematchReady = matchEpochRef.current > 1 && snapshot.game?.status === 'ready';
+        const resolvedReady = isRematchReady ? Boolean(p.is_ready) : Boolean(p.is_ready || prev?.is_ready);
+
+        return {
           ...p,
-          board: null,
-          is_ready: false,
-          lines_completed: 0,
-        }));
-      } else {
-        const isReadyStatus = snapshot.game?.status === 'ready';
-        setPlayer(prev => {
-          // If we locally hold a 100-number board, never let snapshot overwrite it with null or 25-number board
-          const hasFull100 = Boolean(prev?.board && prev.board.length === 100);
-          const snapHasFull100 = Boolean(p.board && p.board.length === 100);
-          const preservedBoard = hasFull100 && !snapHasFull100 ? prev!.board : (p.board || prev?.board || null);
-
-          // Preserve local readiness once board locked
-          const preservedReady = prev?.is_ready ? true : Boolean(p.is_ready);
-
-          return {
-            ...p,
-            board: isReadyStatus ? (snapHasFull100 ? p.board : (prev?.board || null)) : preservedBoard,
-            is_ready: isReadyStatus ? Boolean(p.is_ready || prev?.is_ready) : preservedReady,
-          };
-        });
-      }
+          board: isRematchReady ? null : resolvedBoard,
+          is_ready: resolvedReady,
+          lines_completed: isRematchReady ? 0 : (p.lines_completed ?? prev?.lines_completed ?? 0),
+        };
+      });
     }
 
     setP1(prev => {
       if (!snapshot.p1) return null;
       const snapP1 = snapshot.p1;
-      const hasFull100 = Boolean(prev?.board && prev.board.length === 100);
-      const snapHasFull100 = Boolean(snapP1.board && snapP1.board.length === 100);
-      // During rematch epoch, trust DB is_ready directly (don't preserve stale true from previous game)
-      const isReadyVal = matchEpochRef.current > 1
-        ? Boolean(snapP1.is_ready)
-        : Boolean(snapP1.is_ready || prev?.is_ready);
+      // Bug B fix: In rematch epoch with status='ready', fully reset — don't carry stale state
+      const isRematchReady = matchEpochRef.current > 1 && snapshot.game?.status === 'ready';
       return {
         ...snapP1,
-        board: hasFull100 && !snapHasFull100 ? prev!.board : (snapP1.board || prev?.board || null),
-        is_ready: isReadyVal,
+        board: isRematchReady ? null : (snapP1.board || prev?.board || null),
+        is_ready: isRematchReady ? Boolean(snapP1.is_ready) : Boolean(snapP1.is_ready || prev?.is_ready),
+        lines_completed: isRematchReady ? 0 : (snapP1.lines_completed ?? prev?.lines_completed ?? 0),
       };
     });
 
     setP2(prev => {
       if (!snapshot.p2) return null;
       const snapP2 = snapshot.p2;
-      const hasFull100 = Boolean(prev?.board && prev.board.length === 100);
-      const snapHasFull100 = Boolean(snapP2.board && snapP2.board.length === 100);
-      // During rematch epoch, trust DB is_ready directly (don't preserve stale true from previous game)
-      const isReadyVal = matchEpochRef.current > 1
-        ? Boolean(snapP2.is_ready)
-        : Boolean(snapP2.is_ready || prev?.is_ready);
+      const isRematchReady = matchEpochRef.current > 1 && snapshot.game?.status === 'ready';
       return {
         ...snapP2,
-        board: hasFull100 && !snapHasFull100 ? prev!.board : (snapP2.board || prev?.board || null),
-        is_ready: isReadyVal,
+        board: isRematchReady ? null : (snapP2.board || prev?.board || null),
+        is_ready: isRematchReady ? Boolean(snapP2.is_ready) : Boolean(snapP2.is_ready || prev?.is_ready),
+        lines_completed: isRematchReady ? 0 : (snapP2.lines_completed ?? prev?.lines_completed ?? 0),
       };
     });
 
-    // Authoritative called numbers merge:
-    // If in rematch epoch and server confirms 0 calls, clear calls.
-    if (matchEpochRef.current > 1 && snapshot.called_numbers?.length === 0) {
+    // Bug B fix: In rematch epoch when server confirms status='ready' (fresh match),
+    // unconditionally wipe the local called-number set regardless of what's in the snapshot.
+    const isRematchReadySnapshot = matchEpochRef.current > 1 && snapshot.game?.status === 'ready';
+    if (isRematchReadySnapshot) {
       setCalledNumbers([]);
       calledNumbersRef.current = [];
     } else if (snapshot.called_numbers) {
-      // Merge server called numbers with locally confirmed calls using Map deduplication
+      // Bug C fix: Never let a snapshot with FEWER entries than our locally-confirmed set
+      // shrink calledNumbers. This prevents the read-after-write lag race where get_game_state
+      // returns a snapshot before the DB write from call_number is replicated.
       setCalledNumbers(prev => {
+        const localLen = prev.length;
+        const snapLen = snapshot.called_numbers.length;
+
+        if (localLen > 0 && snapLen < localLen) {
+          // Snapshot is stale — our local confirmed set is authoritative
+          console.warn(
+            `[BingoDuel:Sync] Snapshot has ${snapLen} calls but local has ${localLen}; keeping local (read-after-write lag).`
+          );
+          return prev;
+        }
+
+        // Merge: snapshot entries win for deduplication (they have authoritative server IDs)
         const callMap = new Map<number, CalledNumber>();
         for (const c of prev) {
           callMap.set(c.number, c);
@@ -440,7 +432,9 @@ export function useBingoGame(initialRoomCode?: string) {
       const nextTarget = nextBoardSize === 10 ? 10 : 5;
 
       setRematchStatus('accepted');
+      // Bug B fix: Immediately clear all stale match state before the new game's syncGameState arrives.
       setCalledNumbers([]);
+      calledNumbersRef.current = [];
       setOptimisticCalled(null);
       setPlayer(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
       setP1(null);
@@ -453,6 +447,10 @@ export function useBingoGame(initialRoomCode?: string) {
         board_size: nextBoardSize,
         target_lines: nextTarget,
       } : null);
+      // Bug B fix: Increment channelEpoch to force channel teardown+re-subscribe.
+      // This is necessary even when the same game_id row is reused (same-row rematch),
+      // since game?.id and game?.room_code won't change, so the channel effect won't re-fire.
+      setChannelEpoch(prev => prev + 1);
 
       if (d.newRoomCode && d.newRoomCode !== gameRef.current?.room_code) {
         console.log('[BingoDuel:Sync] Auto-joining new rematch room:', d.newRoomCode);
@@ -508,7 +506,9 @@ export function useBingoGame(initialRoomCode?: string) {
   syncGameStateRef.current = syncGameState;
 
   // Setup Realtime Channels & Subscriptions with Active Auto-Recovery
-  // Keyed explicitly by BOTH game.id and game.room_code to ensure clean teardown on rematch/new game
+  // Keyed on game.id, game.room_code, AND channelEpoch.
+  // channelEpoch is incremented on rematch acceptance so the channel tears down and
+  // re-subscribes even when the same game_id/room_code row is reused (same-row rematch).
   useEffect(() => {
     if (!game?.id || !game?.room_code) {
       setChannelStatus('DISCONNECTED');
@@ -624,7 +624,8 @@ export function useBingoGame(initialRoomCode?: string) {
       }
       channelRef.current = null;
     };
-  }, [game?.id, game?.room_code]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game?.id, game?.room_code, channelEpoch]);
 
   // Active Board Setup readiness recovery fallback:
   // If this player has locked their board but the game hasn't started yet,
@@ -1011,32 +1012,16 @@ export function useBingoGame(initialRoomCode?: string) {
       });
 
       if (res.error) {
-        const isBoardCountMismatch =
-          res.error.message?.toLowerCase().includes('exactly') ||
-          res.error.message?.toLowerCase().includes('numbers') ||
-          res.error.code === '22023' || // invalid_parameter_value (postgres)
-          res.error.code === 'P0001';   // raise_exception (plpgsql)
-
-        if (isBoardCountMismatch && board.length === 100) {
-          // Dual-layer resilience: if DB has legacy 25-number validation, send a 25-number slice
-          // to confirm is_ready = TRUE and status = 'playing' on Postgres, while strictly
-          // preserving the full 100-number board locally and in Realtime.
-          console.warn('[BingoDuel:Sync] Unmigrated database (expects 25 numbers). Using dual-layer readiness fallback.');
-          const slice25 = Array.from({ length: 25 }, (_, i) => i + 1);
-          const fallbackRes = await supabase.rpc('set_player_board', {
-            p_game_id: game.id,
-            p_session_id: sessionId,
-            p_board: slice25,
-          });
-          if (fallbackRes.error) {
-            throw fallbackRes.error;
-          }
-          rpcData = fallbackRes.data;
-          rpcSuccess = true;
-        } else {
-          // For any other server error, re-throw so the user sees it
-          throw res.error;
-        }
+        // Bug A fix: The previous "dual-layer resilience" fallback that submitted a fake
+        // [1..25] board for 10×10 games was dangerous — it stored the wrong board in the DB
+        // and caused silent game corruption. Any server rejection is now surfaced directly
+        // so the player can see the error and retry with their real board.
+        //
+        // Common causes of rejection:
+        //   - DB running schema before the 10x10 migration (board_size column missing)
+        //   - Board contains duplicates or out-of-range numbers
+        //   - Game was already in 'playing' status (race with opponent)
+        throw res.error;
       } else {
         rpcData = res.data;
         rpcSuccess = true;
@@ -1482,8 +1467,11 @@ export function useBingoGame(initialRoomCode?: string) {
       setP1(newHost);
       setP2(null);
       setCalledNumbers([]);
+      calledNumbersRef.current = [];
       setOptimisticCalled(null);
       setRematchStatus('accepted');
+      // Bug B fix: Force channel to re-subscribe for the new game_id/room_code.
+      setChannelEpoch(prev => prev + 1);
 
       // Fire callback so pages can update route and navigate to board setup
       onRematchAcceptedRef.current?.(newGameData.room_code);

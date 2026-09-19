@@ -1,10 +1,11 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const DEFAULT_SUPABASE_URL = 'https://tbdnklpyjsxvdgeajigu.supabase.co';
-const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_-V5R9VK94XdiCmBAUzdMog_3jml-pIm';
+// These MUST be set via environment variables (.env.local in development, Vercel env in production).
+// See .env.example for the required variable names.
+// IMPORTANT: Never commit actual credentials here — even anon keys should be kept out of source.
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
 
 export const isSupabaseConfigured = (): boolean => {
   return Boolean(

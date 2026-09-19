@@ -72,7 +72,7 @@ export const CreateGameScreen: React.FC<CreateGameScreenProps> = ({
             sounds.playTap();
             onBack();
           }}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high transition-all text-xs font-semibold border border-outline-variant"
+          className="inline-flex items-center gap-1.5 px-3 min-h-[44px] rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high transition-all text-xs font-semibold border border-outline-variant"
         >
           <ArrowLeftIcon className="w-3.5 h-3.5" />
           <span>Back</span>
@@ -97,7 +97,7 @@ export const CreateGameScreen: React.FC<CreateGameScreenProps> = ({
           </span>
           <button
             aria-label="Copy Room Code"
-            className="w-10 h-10 rounded-xl bg-surface-container-high hover:bg-primary-container hover:text-white text-on-surface flex items-center justify-center transition-all active:scale-95 shadow-xs border border-outline-variant"
+            className="w-11 h-11 rounded-xl bg-surface-container-high hover:bg-primary-container hover:text-white text-on-surface flex items-center justify-center transition-all active:scale-95 shadow-xs border border-outline-variant"
             onClick={handleCopyCode}
           >
             {copied ? (
@@ -205,7 +205,7 @@ export const CreateGameScreen: React.FC<CreateGameScreenProps> = ({
               sounds.playTap();
               setAutoFill(true);
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            className={`px-3 min-h-[44px] rounded-lg text-xs font-semibold transition-all cursor-pointer ${
               autoFill
                 ? 'bg-surface-container-high text-primary-container shadow-xs border border-outline-variant'
                 : 'text-on-surface-variant hover:text-on-surface'
@@ -218,7 +218,7 @@ export const CreateGameScreen: React.FC<CreateGameScreenProps> = ({
               sounds.playTap();
               setAutoFill(false);
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            className={`px-3 min-h-[44px] rounded-lg text-xs font-semibold transition-all cursor-pointer ${
               !autoFill
                 ? 'bg-surface-container-high text-primary-container shadow-xs border border-outline-variant'
                 : 'text-on-surface-variant hover:text-on-surface'

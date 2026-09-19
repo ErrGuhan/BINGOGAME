@@ -48,7 +48,7 @@ export const Header: React.FC<HeaderProps> = ({
           {showBack && onBack && (
             <button
               aria-label="Go Back"
-              className="w-8 h-8 flex items-center justify-center rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high transition-all active:scale-95 border border-outline-variant"
+              className="w-11 h-11 flex items-center justify-center rounded-full bg-surface-container text-on-surface hover:bg-surface-container-high transition-all active:scale-95 border border-outline-variant"
               onClick={() => {
                 sounds.playTap();
                 onBack();
@@ -81,7 +81,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-2">
           <button
             aria-label="Sound Toggle"
-            className={`w-8 h-8 flex items-center justify-center rounded-full transition-all active:scale-95 border border-outline-variant bg-surface-container ${
+            className={`w-11 h-11 flex items-center justify-center rounded-full transition-all active:scale-95 border border-outline-variant bg-surface-container ${
               isMuted
                 ? 'text-on-surface-variant/50'
                 : 'text-primary-container'

@@ -9,6 +9,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
+    // Exclude Playwright test directory — Playwright has its own runner
+    exclude: ['tests/**', 'node_modules/**'],
   },
   resolve: {
     alias: {
