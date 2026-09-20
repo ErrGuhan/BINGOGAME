@@ -320,7 +320,7 @@ export const MainGameScreen: React.FC<MainGameScreenProps> = ({
                 {playerName}
               </span>
               <span className="font-label-sm text-[11px] text-primary-container font-bold leading-none mt-0.5">
-                {Math.max(myLines, completedLines.length)} / {targetLines} {boardSize === 10 ? 'Strikes' : 'Lines'}
+                {completedLines.length} / {targetLines} {boardSize === 10 ? 'Strikes' : 'Lines'}
               </span>
             </div>
           </div>

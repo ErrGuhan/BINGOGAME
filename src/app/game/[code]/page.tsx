@@ -6,6 +6,7 @@ import { BoardSetupScreen } from '@/components/BoardSetupScreen';
 import { MainGameScreen } from '@/components/MainGameScreen';
 import { VictoryScreen } from '@/components/VictoryScreen';
 import { ReconnectingModal } from '@/components/ReconnectingModal';
+import { ConnectionHandshakeModal } from '@/components/ConnectionHandshakeModal';
 import { useBingoGame } from '@/hooks/useBingoGame';
 import { clearActiveRoomCode } from '@/lib/gameEngine';
 import { useRouter } from 'next/navigation';
@@ -15,6 +16,7 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
   const router = useRouter();
   const joinedRoomRef = useRef<string | null>(null);
   const [showDebugHud, setShowDebugHud] = useState<boolean>(false);
+  const [showHandshake, setShowHandshake] = useState<boolean>(false);
 
   const {
     game,
@@ -56,9 +58,13 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
   useEffect(() => {
     if (roomCode && joinedRoomRef.current !== roomCode) {
       joinedRoomRef.current = roomCode;
-      joinGame(roomCode).catch(err => {
-        console.error('Failed to join from direct link:', err);
-      });
+      joinGame(roomCode)
+        .then(() => {
+          setShowHandshake(true);
+        })
+        .catch(err => {
+          console.error('Failed to join from direct link:', err);
+        });
     }
   }, [roomCode, joinGame]);
 
@@ -125,6 +131,16 @@ function GameRoomContent({ roomCode }: { roomCode: string }) {
               </button>
             </div>
           </div>
+        )}
+
+        {showHandshake && (
+          <ConnectionHandshakeModal
+            roomCode={roomCode}
+            hostName={p1?.display_name || 'Host'}
+            challengerName={player?.display_name || 'You'}
+            boardSize={boardSize}
+            onComplete={() => setShowHandshake(false)}
+          />
         )}
 
         {/* Board Setup State (waiting/ready before play, or when rematch accepted, or if playing but player hasn't locked board yet) */}

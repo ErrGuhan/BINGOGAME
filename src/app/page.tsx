@@ -10,6 +10,7 @@ import { MainGameScreen } from '@/components/MainGameScreen';
 import { VictoryScreen } from '@/components/VictoryScreen';
 import { ReconnectingModal } from '@/components/ReconnectingModal';
 import { LeaderboardScreen } from '@/components/LeaderboardScreen';
+import { ConnectionHandshakeModal } from '@/components/ConnectionHandshakeModal';
 import { useBingoGame } from '@/hooks/useBingoGame';
 import { sounds } from '@/components/AudioController';
 import { getActiveRoomCode, clearActiveRoomCode } from '@/lib/gameEngine';
@@ -21,6 +22,7 @@ export default function App() {
   const [autoFillBoard, setAutoFillBoard] = useState<boolean>(true);
   const [prefilledJoinCode, setPrefilledJoinCode] = useState<string>('');
   const [showDebugHud, setShowDebugHud] = useState<boolean>(false);
+  const [showHandshake, setShowHandshake] = useState<boolean>(false);
 
   const {
     game,
@@ -147,7 +149,7 @@ export default function App() {
     if (code) {
       setPrefilledJoinCode(code);
       joinGame(code)
-        .then(() => setScreen('setup'))
+        .then(() => setShowHandshake(true))
         .catch(() => setScreen('join'));
     } else {
       setPrefilledJoinCode('');
@@ -158,8 +160,9 @@ export default function App() {
   // Handle Join Code Submission
   const handleJoinSubmit = async (code: string) => {
     try {
+      setPrefilledJoinCode(code);
       await joinGame(code);
-      setScreen('setup');
+      setShowHandshake(true);
     } catch (err) {
       console.error(err);
     }
@@ -256,6 +259,19 @@ export default function App() {
             onBack={handleBackToHome}
             loading={loading}
             errorMessage={error}
+          />
+        )}
+
+        {showHandshake && (
+          <ConnectionHandshakeModal
+            roomCode={game?.room_code || prefilledJoinCode}
+            hostName={p1?.display_name || 'Host'}
+            challengerName={player?.display_name || 'You'}
+            boardSize={boardSize}
+            onComplete={() => {
+              setShowHandshake(false);
+              setScreen('setup');
+            }}
           />
         )}
 

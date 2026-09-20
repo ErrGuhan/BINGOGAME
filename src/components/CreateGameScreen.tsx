@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   ArrowLeftIcon,
   ClipboardDocumentIcon,
@@ -35,6 +35,15 @@ export const CreateGameScreen: React.FC<CreateGameScreenProps> = ({
 }) => {
   const [copied, setCopied] = useState<boolean>(false);
   const [autoFill, setAutoFill] = useState<boolean>(true);
+
+  // Play celebratory chime when rival connects to lobby
+  const prevConnectedRef = useRef(opponentConnected);
+  useEffect(() => {
+    if (!prevConnectedRef.current && opponentConnected) {
+      sounds.playDraft(660);
+    }
+    prevConnectedRef.current = opponentConnected;
+  }, [opponentConnected]);
 
   const handleCopyCode = async () => {
     sounds.playTap();
@@ -119,10 +128,22 @@ export const CreateGameScreen: React.FC<CreateGameScreenProps> = ({
       </div>
 
       {/* Opponent Status Indicator */}
-      <div className="w-full rounded-2xl bg-surface-container/60 backdrop-blur-xl p-4 border border-outline-variant flex items-center gap-3 shadow-xs">
-        <div className="relative flex items-center justify-center w-10 h-10 shrink-0 rounded-full bg-surface-container-high border border-outline-variant">
+      <div
+        className={`w-full rounded-2xl backdrop-blur-xl p-4 border transition-all duration-300 flex items-center gap-3 shadow-xs ${
+          opponentConnected
+            ? 'bg-secondary-container/10 border-secondary-container/30 shadow-md'
+            : 'bg-surface-container/60 border-outline-variant'
+        }`}
+      >
+        <div
+          className={`relative flex items-center justify-center w-10 h-10 shrink-0 rounded-full border transition-all ${
+            opponentConnected
+              ? 'bg-secondary-container/20 border-secondary-container/40'
+              : 'bg-surface-container-high border-outline-variant'
+          }`}
+        >
           {opponentConnected ? (
-            <CheckCircleIcon className="w-6 h-6 text-secondary-container" />
+            <CheckCircleIcon className="w-6 h-6 text-secondary-container animate-scaleIn" />
           ) : (
             <div className="w-3 h-3 rounded-full bg-primary-container animate-pulse" />
           )}

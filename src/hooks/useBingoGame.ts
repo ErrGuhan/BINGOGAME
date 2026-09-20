@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Game, Player, CalledNumber, GameStateSnapshot, CallNumberResult, BoardSize, GameVariant } from '@/types/bingo';
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase';
 import { getSessionId, getPlayerName, setPlayerName, setActiveRoomCode, clearActiveRoomCode, calculateLines, getPlayerId } from '@/lib/gameEngine';
+import { resolveGameVariant, validateBoardForVariant } from '@/lib/variantResolver';
 import { sounds } from '@/components/AudioController';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -90,10 +91,12 @@ export function useBingoGame(initialRoomCode?: string) {
   const winner = game?.winner_id ? (game.winner_id === player?.id ? player : opponent) : null;
   const isWinner = Boolean(player && game?.winner_id && player.id === game.winner_id);
 
-  const boardSize: BoardSize = (game?.variant === '10x10' || game?.board_size === 10) ? 10 : 5;
-  // Always prefer the authoritative DB value; fall back to board-size derivation
-  // only when the game object hasn't loaded yet.
-  const targetLines: number = game?.target_lines || (boardSize === 10 ? 10 : 5);
+  const variantConfig = useMemo(() => {
+    return resolveGameVariant(game, player?.board);
+  }, [game, player?.board]);
+
+  const boardSize: BoardSize = variantConfig.boardSize;
+  const targetLines: number = variantConfig.targetLines;
 
   // Synchronous client line calculation for immediate strike & header animation lockstep
   const myCalculatedLines = useMemo(() => {
@@ -106,8 +109,8 @@ export function useBingoGame(initialRoomCode?: string) {
     return calculateLines(opponent.board, calledNumbers.map(c => c.number), boardSize).lines;
   }, [opponent?.board, calledNumbers, boardSize]);
 
-  const myLines = Math.max(isHost ? (p1?.lines_completed || 0) : (p2?.lines_completed || 0), myCalculatedLines);
-  const opponentLines = Math.max(isHost ? (p2?.lines_completed || 0) : (p1?.lines_completed || 0), opponentCalculatedLines);
+  const myLines = myCalculatedLines;
+  const opponentLines = opponentCalculatedLines;
 
   // Sync state from snapshot
   const applySnapshot = useCallback((snapshot: GameStateSnapshot | null) => {
@@ -119,13 +122,14 @@ export function useBingoGame(initialRoomCode?: string) {
     setGame(prev => {
       if (!snapshot.game) return null;
 
-      const dbBoardSize = snapshot.game.board_size;
-      const dbVariant = snapshot.game.variant;
-      const resolvedBoardSize: BoardSize = (dbBoardSize === 10 || dbBoardSize === 5)
-        ? dbBoardSize
-        : (dbVariant === '10x10' ? 10 : (prev?.board_size === 10 ? 10 : 5));
-      const resolvedVariant: GameVariant = dbVariant || (resolvedBoardSize === 10 ? '10x10' : '5x5');
-      const resolvedTarget = snapshot.game.target_lines || (resolvedBoardSize === 10 ? 10 : 5);
+      const resolvedConfig = resolveGameVariant(
+        snapshot.game,
+        snapshot.player?.board || player?.board,
+        prev?.board_size
+      );
+      const resolvedBoardSize: BoardSize = resolvedConfig.boardSize;
+      const resolvedVariant: GameVariant = resolvedConfig.variant;
+      const resolvedTarget: number = resolvedConfig.targetLines;
 
       // Bug C fix: Use game.current_turn_player_id exclusively as the single source of truth
       // for turn tracking. Do not re-derive from calledNumbers — that path creates transient
@@ -552,7 +556,7 @@ export function useBingoGame(initialRoomCode?: string) {
         .on('broadcast', { event: 'GAME_MODE_CHANGED' }, ({ payload }) => handleRealtimeEventRef.current('GAME_MODE_CHANGED', payload))
         .on('broadcast', { event: 'TIMEOUT_WIN_CLAIMED' }, ({ payload }) => handleRealtimeEventRef.current('TIMEOUT_WIN_CLAIMED', payload))
         .on('broadcast', { event: 'HEARTBEAT' }, ({ payload }) => handleRealtimeEventRef.current('HEARTBEAT', payload))
-        // Direct Database Postgres Changes: Fires in ~50ms whenever a number is called in Supabase
+        // Direct Database Postgres Changes: Fires in ~50ms whenever game/player/calls update in Supabase
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'called_numbers' }, (payload) => {
           if (gameRef.current?.id && (payload.new as { game_id?: string })?.game_id === gameRef.current.id) {
             syncGameStateRef.current(gameRef.current.id);
@@ -560,6 +564,16 @@ export function useBingoGame(initialRoomCode?: string) {
         })
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games' }, (payload) => {
           if (gameRef.current?.id && (payload.new as { id?: string })?.id === gameRef.current.id) {
+            syncGameStateRef.current(gameRef.current.id);
+          }
+        })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'players' }, (payload) => {
+          if (gameRef.current?.id && (payload.new as { game_id?: string })?.game_id === gameRef.current.id) {
+            syncGameStateRef.current(gameRef.current.id);
+          }
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'players' }, (payload) => {
+          if (gameRef.current?.id && (payload.new as { game_id?: string })?.game_id === gameRef.current.id) {
             syncGameStateRef.current(gameRef.current.id);
           }
         })
@@ -828,15 +842,14 @@ export function useBingoGame(initialRoomCode?: string) {
     setError(null);
 
     const sessionId = getSession();
-    const newTarget = newBoardSize === 10 ? 10 : 5;
-    const newVariant: GameVariant = newBoardSize === 10 ? '10x10' : '5x5';
+    const config = resolveGameVariant(null, null, newBoardSize);
 
     // Optimistically update host state
     setGame(prev => prev ? {
       ...prev,
-      board_size: newBoardSize,
-      variant: newVariant,
-      target_lines: newTarget,
+      board_size: config.boardSize,
+      variant: config.variant,
+      target_lines: config.targetLines,
     } : null);
     setPlayer(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
     setP1(prev => prev ? { ...prev, board: null, is_ready: false, lines_completed: 0 } : null);
@@ -846,16 +859,30 @@ export function useBingoGame(initialRoomCode?: string) {
     channelRef.current?.send({
       type: 'broadcast',
       event: 'GAME_MODE_CHANGED',
-      payload: { boardSize: newBoardSize, variant: newVariant, targetLines: newTarget },
+      payload: { boardSize: config.boardSize, variant: config.variant, targetLines: config.targetLines },
     }).catch(() => {});
 
     try {
+      // 1. Call server API route with admin privileges to update database
+      await fetch('/api/game/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gameId: game.id,
+          sessionId,
+          boardSize: config.boardSize,
+        }),
+      }).catch((fetchErr) => {
+        console.warn('[setGameMode] Server API update notice:', fetchErr);
+      });
+
+      // 2. Also attempt direct RPC if present
       const supabase = getSupabase();
       if (supabase && isSupabaseConfigured()) {
         await supabase.rpc('set_game_mode', {
           p_game_id: game.id,
           p_session_id: sessionId,
-          p_board_size: newBoardSize,
+          p_board_size: config.boardSize,
         });
       }
     } catch (err: unknown) {
@@ -897,16 +924,13 @@ export function useBingoGame(initialRoomCode?: string) {
 
       setActiveRoomCode(cleanCode);
 
-      if (data?.board_size || data?.variant) {
-        const joinedBoardSize = (data.board_size as BoardSize) || (data.variant === '10x10' ? 10 : 5);
-        const joinedVariant: GameVariant = data.variant || (joinedBoardSize === 10 ? '10x10' : '5x5');
-        setGame(prev => prev ? {
-          ...prev,
-          board_size: joinedBoardSize,
-          variant: joinedVariant,
-          target_lines: data.target_lines || (joinedBoardSize === 10 ? 10 : 5),
-        } : null);
-      }
+      const resolvedConfig = resolveGameVariant(data);
+      setGame(prev => prev ? {
+        ...prev,
+        board_size: resolvedConfig.boardSize,
+        variant: resolvedConfig.variant,
+        target_lines: resolvedConfig.targetLines,
+      } : null);
 
       // Broadcast to Room that Player 2 joined so Host receives immediate notification
       if (!data.is_reconnect && data.player_number === 2) {
@@ -924,6 +948,7 @@ export function useBingoGame(initialRoomCode?: string) {
           },
         };
 
+        const roomTopic = `room:${cleanCode}`;
         if (channelRef.current) {
           channelRef.current.send({
             type: 'broadcast',
@@ -931,22 +956,20 @@ export function useBingoGame(initialRoomCode?: string) {
             payload: joinPayload,
           }).catch(() => {});
         } else {
-          const tempJoinChannel = supabase.channel(`notifier:${cleanCode}:${Date.now()}`);
-          tempJoinChannel.subscribe((status) => {
+          // Connect directly to the host's room channel (sub-100ms notification)
+          const joinChannel = supabase.channel(roomTopic, {
+            config: { broadcast: { self: false } },
+          });
+          joinChannel.subscribe((status) => {
             if (status === 'SUBSCRIBED') {
-              tempJoinChannel.send({
+              joinChannel.send({
                 type: 'broadcast',
                 event: 'PLAYER_JOINED',
                 payload: joinPayload,
-              }).then(() => {
-                setTimeout(() => {
-                  supabase.removeChannel(tempJoinChannel);
-                }, 1000);
-              }).catch(() => {
-                supabase.removeChannel(tempJoinChannel);
-              });
+              }).catch(() => {});
             }
           });
+          channelRef.current = joinChannel;
         }
       }
 
@@ -972,10 +995,15 @@ export function useBingoGame(initialRoomCode?: string) {
     setError(null);
     const sessionId = getSession();
 
-    // Capture board size from game at call-time to avoid stale closure bugs
-    // (game.board_size is the authoritative value; boardSize in outer scope may lag)
-    const currentGameBoardSize: BoardSize = game.board_size === 10 ? 10 : 5;
-    const expectedCellCount = currentGameBoardSize * currentGameBoardSize;
+    // Authoritative variant config from single source of truth
+    const config = resolveGameVariant(game, board);
+    const validation = validateBoardForVariant(board, config);
+    if (!validation.isValid) {
+      setLoading(false);
+      const errMsg = validation.error || 'Invalid board';
+      setError(errMsg);
+      throw new Error(errMsg);
+    }
 
     // 1. Immediately store board in local state to eliminate race condition on game start
     setPlayer(prev => prev ? { ...prev, board, is_ready: true } : null);
@@ -991,16 +1019,6 @@ export function useBingoGame(initialRoomCode?: string) {
         throw new Error('Supabase is not configured. Please check your environment variables in .env.local.');
       }
 
-      // Guard: ensure the board we're submitting matches what the game expects.
-      // This catches client/server mode-mismatch before hitting the network.
-      if (board.length !== expectedCellCount) {
-        throw new Error(
-          `Board has ${board.length} numbers but the game expects ${expectedCellCount} ` +
-          `(${currentGameBoardSize}x${currentGameBoardSize} mode). ` +
-          `Please clear and re-fill your board.`
-        );
-      }
-
       let rpcData: any = null;
       let rpcSuccess = false;
 
@@ -1012,16 +1030,32 @@ export function useBingoGame(initialRoomCode?: string) {
       });
 
       if (res.error) {
-        // Bug A fix: The previous "dual-layer resilience" fallback that submitted a fake
-        // [1..25] board for 10×10 games was dangerous — it stored the wrong board in the DB
-        // and caused silent game corruption. Any server rejection is now surfaced directly
-        // so the player can see the error and retry with their real board.
-        //
-        // Common causes of rejection:
-        //   - DB running schema before the 10x10 migration (board_size column missing)
-        //   - Board contains duplicates or out-of-range numbers
-        //   - Game was already in 'playing' status (race with opponent)
-        throw res.error;
+        const errMsg = (res.error.message || '').toLowerCase();
+        const isLegacyOrConstraint =
+          errMsg.includes('25') ||
+          errMsg.includes('could not find the function') ||
+          errMsg.includes('schema cache');
+
+        if (isLegacyOrConstraint) {
+          console.warn('[BingoDuel:Setup] Unmigrated DB stored procedure constraint. Falling back to server API route /api/game/board...');
+          const apiRes = await fetch('/api/game/board', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              gameId: game.id,
+              sessionId,
+              board,
+            }),
+          });
+          const apiJson = await apiRes.json();
+          if (!apiRes.ok || apiJson.error) {
+            throw new Error(apiJson.error || 'Failed to submit board via server');
+          }
+          rpcData = apiJson;
+          rpcSuccess = true;
+        } else {
+          throw res.error;
+        }
       } else {
         rpcData = res.data;
         rpcSuccess = true;
@@ -1054,7 +1088,7 @@ export function useBingoGame(initialRoomCode?: string) {
           allReady: isAllReady,
           status: isAllReady ? 'playing' : 'ready',
           currentTurnPlayerId: turnId,
-          boardSize: currentGameBoardSize,
+          boardSize: config.boardSize,
         },
       }).catch((broadcastErr) => {
         console.warn('[setBoard] PLAYER_READY broadcast failed:', broadcastErr);
@@ -1180,6 +1214,17 @@ export function useBingoGame(initialRoomCode?: string) {
                 ? null
                 : (callerIsP1 ? (p2?.id || p2Ref.current?.id || opponent?.id) : (p1?.id || p1Ref.current?.id || opponent?.id)) || null;
 
+              // Sync call state server-side
+              fetch('/api/game/call', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  gameId: game.id,
+                  sessionId,
+                  number,
+                }),
+              }).catch(() => {});
+
               rpcData = {
                 success: true,
                 number,
@@ -1230,6 +1275,17 @@ export function useBingoGame(initialRoomCode?: string) {
             const nextTurnId = isGameOver
               ? null
               : (callerIsP1 ? (p2?.id || p2Ref.current?.id || opponent?.id) : (p1?.id || p1Ref.current?.id || opponent?.id)) || null;
+
+              // Sync call state server-side
+              fetch('/api/game/call', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  gameId: game.id,
+                  sessionId,
+                  number,
+                }),
+              }).catch(() => {});
 
             rpcData = {
               success: true,

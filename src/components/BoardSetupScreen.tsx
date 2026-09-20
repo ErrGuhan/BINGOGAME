@@ -13,6 +13,8 @@ import {
 } from '@heroicons/react/24/outline';
 import { sounds } from './AudioController';
 import { BoardSize } from '@/types/bingo';
+import { generateRandomBoard } from '@/lib/gameEngine';
+import { resolveGameVariant, validateBoardForVariant } from '@/lib/variantResolver';
 
 // ─── Memoized board cell for BoardSetup ────────────────────────────────────────
 interface BoardSetupCellProps {
@@ -100,7 +102,12 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
   const totalCells = boardSize * boardSize;
 
   // Board: array of placed numbers (null = empty)
-  const [board, setBoard] = useState<(number | null)[]>(() => Array(totalCells).fill(null));
+  const [board, setBoard] = useState<(number | null)[]>(() => {
+    if (initialAutoFill) {
+      return generateRandomBoard(boardSize);
+    }
+    return Array(totalCells).fill(null);
+  });
   const placedCount = useMemo(() => board.filter(v => v !== null).length, [board]);
   const isComplete = placedCount === totalCells;
   const usedNumbers = useMemo(() => new Set(board.filter((v): v is number => v !== null)), [board]);
@@ -113,10 +120,14 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
     return totalCells + 1;
   }, [totalCells, usedNumbers]);
 
-  // Re-initialize board whenever boardSize changes
+  // Re-initialize board whenever boardSize or initialAutoFill changes
   useEffect(() => {
-    setBoard(Array(totalCells).fill(null));
-  }, [boardSize, totalCells]);
+    if (initialAutoFill) {
+      setBoard(generateRandomBoard(boardSize));
+    } else {
+      setBoard(Array(totalCells).fill(null));
+    }
+  }, [boardSize, totalCells, initialAutoFill]);
 
   // Tap-to-assign: empty cell → assign nextAvailableNumber; filled cell → clear it
   const handleCellClick = useCallback((idx: number) => {
@@ -163,6 +174,12 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
 
   const handleConfirm = () => {
     if (!isComplete || loading) return;
+    const config = resolveGameVariant(null, null, boardSize);
+    const validation = validateBoardForVariant(board, config);
+    if (!validation.isValid) {
+      sounds.playAlert();
+      return;
+    }
     sounds.playVictory();
     onConfirmBoard(board as number[]);
   };
