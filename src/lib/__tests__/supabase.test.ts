@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { isSupabaseConfigured, getSupabase } from '../supabase';
+import { isSupabaseConfigured, getSupabase, getSupabaseConfigStatus } from '../supabase';
 
 describe('Supabase Client Configuration', () => {
   // In test environments, NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -49,5 +49,17 @@ describe('Supabase Client Configuration', () => {
 
     delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  });
+
+  it('reports specific missing variables when unconfigured', () => {
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_PUBLISHABLE_KEY;
+
+    const { configured, missingVars } = getSupabaseConfigStatus();
+    expect(configured).toBe(false);
+    expect(missingVars).toContain('NEXT_PUBLIC_SUPABASE_URL (or SUPABASE_URL)');
+    expect(missingVars).toContain('NEXT_PUBLIC_SUPABASE_ANON_KEY (or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)');
   });
 });

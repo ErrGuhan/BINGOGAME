@@ -22,23 +22,66 @@ export const getSupabaseKey = (): string => {
   );
 };
 
-export const isSupabaseConfigured = (): boolean => {
+let hasLoggedConfigError = false;
+
+export const resetSupabaseConfigLog = (): void => {
+  hasLoggedConfigError = false;
+};
+
+export const getSupabaseConfigStatus = (): {
+  configured: boolean;
+  missingVars: string[];
+  placeholderVars: string[];
+} => {
   const url = getSupabaseUrl();
   const key = getSupabaseKey();
-  return Boolean(
-    url &&
-    key &&
-    !url.includes('your-supabase-url') &&
-    !url.includes('your-project-ref') &&
-    !key.includes('your-anon-key') &&
-    !key.includes('your-publishable-key')
-  );
+  const missingVars: string[] = [];
+  const placeholderVars: string[] = [];
+
+  if (!url) {
+    missingVars.push('NEXT_PUBLIC_SUPABASE_URL (or SUPABASE_URL)');
+  } else if (url.includes('your-supabase-url') || url.includes('your-project-ref')) {
+    placeholderVars.push('NEXT_PUBLIC_SUPABASE_URL (unconfigured placeholder URL)');
+  }
+
+  if (!key) {
+    missingVars.push('NEXT_PUBLIC_SUPABASE_ANON_KEY (or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)');
+  } else if (key.includes('your-anon-key') || key.includes('your-publishable-key')) {
+    placeholderVars.push('NEXT_PUBLIC_SUPABASE_ANON_KEY (unconfigured placeholder key)');
+  }
+
+  return {
+    configured: missingVars.length === 0 && placeholderVars.length === 0,
+    missingVars,
+    placeholderVars,
+  };
+};
+
+export const isSupabaseConfigured = (logErrors: boolean = true): boolean => {
+  const status = getSupabaseConfigStatus();
+  if (!status.configured && logErrors && !hasLoggedConfigError) {
+    hasLoggedConfigError = true;
+    if (status.missingVars.length > 0) {
+      console.error(
+        `[Supabase Config Error] Missing required environment variable(s): ${status.missingVars.join(', ')}. ` +
+        `Please check your .env.local (local dev) or Vercel Environment Variables (production).`
+      );
+    }
+    if (status.placeholderVars.length > 0) {
+      console.error(
+        `[Supabase Config Error] Placeholder values detected: ${status.placeholderVars.join(', ')}. ` +
+        `Please replace them with your actual Supabase project credentials.`
+      );
+    }
+  }
+  return status.configured;
 };
 
 let clientInstance: SupabaseClient | null = null;
 
 export const resetSupabaseClient = (): void => {
   clientInstance = null;
+  hasLoggedConfigError = false;
 };
 
 export const getSupabase = (): SupabaseClient | null => {
