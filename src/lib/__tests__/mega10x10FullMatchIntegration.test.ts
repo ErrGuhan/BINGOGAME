@@ -8,15 +8,14 @@ import {
   validateBoardForVariant,
   HEADERS_10,
 } from '../variantResolver';
-import { GameSession, Player } from '@/types/bingo';
+import { Game, Player } from '@/types/bingo';
 
 describe('Mega 10x10 Full Match Integration & Rules Lifecycle', () => {
   it('simulates a complete 10x10 match: mode toggle, board validation, turn alternation, and 10-strike victory', () => {
     // 1. Host creates game in 5x5 mode
-    let game: GameSession = {
+    let game: Game = {
       id: 'game-mega-test-01',
       room_code: 'MEGA',
-      host_session_id: 'host-sess-1',
       status: 'waiting',
       variant: '5x5',
       board_size: 5,
@@ -24,18 +23,16 @@ describe('Mega 10x10 Full Match Integration & Rules Lifecycle', () => {
       current_turn_player_id: null,
       winner_id: null,
       created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
     };
 
     let p1: Player = {
       id: 'p1-uuid',
-      game_id: game.id,
       session_id: 'host-sess-1',
       player_number: 1,
       display_name: 'AlphaHost',
       board: null,
       is_ready: false,
-      created_at: new Date().toISOString(),
+      connected: true,
     };
 
     // 2. Mode toggling regression: 5x5 -> 10x10 -> 5x5 -> 10x10 on Board Setup
@@ -61,13 +58,12 @@ describe('Mega 10x10 Full Match Integration & Rules Lifecycle', () => {
     // 3. Guest joins
     let p2: Player = {
       id: 'p2-uuid',
-      game_id: game.id,
       session_id: 'guest-sess-2',
       player_number: 2,
       display_name: 'BravoRival',
       board: null,
       is_ready: false,
-      created_at: new Date().toISOString(),
+      connected: true,
     };
 
     // 4. Board Setup & Lock:
@@ -172,8 +168,10 @@ describe('Mega 10x10 Full Match Integration & Rules Lifecycle', () => {
     expect(game.current_turn_player_id).toBe(p1.id);
 
     // 6. Progressive Strike Completion up to exactly 10 strikes on P1's board
-    // Let's create an ordered board for P1: 1..100
+    // P1 board: 1..100 (row 9 has numbers 91..100)
     p1.board = Array.from({ length: 100 }, (_, i) => i + 1);
+    // P2 board: 100..1 (row 0 has numbers 100..91)
+    p2.board = Array.from({ length: 100 }, (_, i) => 100 - i);
     // Reset called numbers for deterministic strike progression
     calledNumbers.length = 0;
 
