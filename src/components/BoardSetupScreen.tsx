@@ -174,7 +174,8 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
 
   const handleConfirm = () => {
     if (!isComplete || loading) return;
-    const config = resolveGameVariant(null, null, boardSize);
+    const is10 = board.length === 100 || boardSize === 10;
+    const config = resolveGameVariant(null, board, is10 ? 10 : 5);
     const validation = validateBoardForVariant(board, config);
     if (!validation.isValid) {
       sounds.playAlert();
@@ -225,8 +226,8 @@ export const BoardSetupScreen: React.FC<BoardSetupScreenProps> = ({
         </div>
       )}
 
-      {/* Host Mode Switcher Banner */}
-      {isHost && onSwitchMode && !isReady && (
+      {/* Mode Switcher Banner (Pre-match for both players) */}
+      {onSwitchMode && !isReady && (
         <div className="w-full bg-surface-container/60 backdrop-blur-xl rounded-xl p-2 border border-outline-variant flex items-center justify-between gap-2 shadow-xs">
           <span className="font-label-sm text-[11px] text-on-surface-variant font-semibold pl-1">
             Duel Mode:

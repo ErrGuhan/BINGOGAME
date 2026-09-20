@@ -92,8 +92,8 @@ export function useBingoGame(initialRoomCode?: string) {
   const isWinner = Boolean(player && game?.winner_id && player.id === game.winner_id);
 
   const variantConfig = useMemo(() => {
-    return resolveGameVariant(game, player?.board);
-  }, [game, player?.board]);
+    return resolveGameVariant(game, player?.board || p1?.board || p2?.board, game?.board_size);
+  }, [game, player?.board, p1?.board, p2?.board]);
 
   const boardSize: BoardSize = variantConfig.boardSize;
   const targetLines: number = variantConfig.targetLines;
@@ -124,7 +124,7 @@ export function useBingoGame(initialRoomCode?: string) {
 
       const resolvedConfig = resolveGameVariant(
         snapshot.game,
-        snapshot.player?.board || player?.board,
+        snapshot.player?.board || snapshot.p1?.board || snapshot.p2?.board || player?.board,
         prev?.board_size
       );
       const resolvedBoardSize: BoardSize = resolvedConfig.boardSize;
@@ -835,16 +835,16 @@ export function useBingoGame(initialRoomCode?: string) {
     }
   }, [getSession, syncGameState]);
 
-  // ACTION: Set Game Mode (Host switches 5x5 or 10x10)
+  // ACTION: Set Game Mode (Allows switching 5x5 or 10x10 before match starts)
   const setGameMode = useCallback(async (newBoardSize: BoardSize) => {
-    if (!game?.id || player?.player_number !== 1) return;
+    if (!game?.id || (game.status !== 'waiting' && game.status !== 'ready')) return;
     setLoading(true);
     setError(null);
 
     const sessionId = getSession();
     const config = resolveGameVariant(null, null, newBoardSize);
 
-    // Optimistically update host state
+    // Optimistically update local state
     setGame(prev => prev ? {
       ...prev,
       board_size: config.boardSize,
@@ -864,7 +864,7 @@ export function useBingoGame(initialRoomCode?: string) {
 
     try {
       // 1. Call server API route with admin privileges to update database
-      await fetch('/api/game/mode', {
+      const res = await fetch('/api/game/mode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -872,9 +872,11 @@ export function useBingoGame(initialRoomCode?: string) {
           sessionId,
           boardSize: config.boardSize,
         }),
-      }).catch((fetchErr) => {
-        console.warn('[setGameMode] Server API update notice:', fetchErr);
       });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Failed to update game mode on server');
+      }
 
       // 2. Also attempt direct RPC if present
       const supabase = getSupabase();
@@ -890,7 +892,7 @@ export function useBingoGame(initialRoomCode?: string) {
     } finally {
       setLoading(false);
     }
-  }, [game?.id, player?.player_number, getSession]);
+  }, [game?.id, game?.status, getSession]);
 
   // ACTION: Join Game (Supabase Server-Side RPC)
   const joinGame = useCallback(async (roomCode: string, displayName?: string, silent: boolean = false) => {
@@ -931,6 +933,19 @@ export function useBingoGame(initialRoomCode?: string) {
         variant: resolvedConfig.variant,
         target_lines: resolvedConfig.targetLines,
       } : null);
+
+      // Synchronously establish player state immediately upon join
+      setPlayer({
+        id: data.player_id,
+        session_id: sessionId,
+        display_name: name,
+        player_number: (data.player_number as 1 | 2) || 2,
+        board: null,
+        is_ready: false,
+        connected: true,
+        lines_completed: 0,
+        last_seen_at: new Date().toISOString(),
+      });
 
       // Broadcast to Room that Player 2 joined so Host receives immediate notification
       if (!data.is_reconnect && data.player_number === 2) {
@@ -995,8 +1010,9 @@ export function useBingoGame(initialRoomCode?: string) {
     setError(null);
     const sessionId = getSession();
 
-    // Authoritative variant config from single source of truth
-    const config = resolveGameVariant(game, board);
+    // Compute variant configuration inline directly from board length and active game
+    const is10x10 = board.length === 100 || game.target_lines === 10 || game.board_size === 10;
+    const config = resolveGameVariant(game, board, is10x10 ? 10 : 5);
     const validation = validateBoardForVariant(board, config);
     if (!validation.isValid) {
       setLoading(false);
@@ -1022,22 +1038,32 @@ export function useBingoGame(initialRoomCode?: string) {
       let rpcData: any = null;
       let rpcSuccess = false;
 
-      // Attempt server RPC with full board
-      const res = await supabase.rpc('set_player_board', {
-        p_game_id: game.id,
-        p_session_id: sessionId,
-        p_board: board,
-      });
+      if (is10x10) {
+        // Direct server API route for Mega 10x10 (bypasses unmigrated 25-number Postgres stored procedure)
+        const apiRes = await fetch('/api/game/board', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            gameId: game.id,
+            sessionId,
+            board,
+          }),
+        });
+        const apiJson = await apiRes.json();
+        if (!apiRes.ok || apiJson.error) {
+          throw new Error(apiJson.error || 'Failed to submit 10x10 board');
+        }
+        rpcData = apiJson;
+        rpcSuccess = true;
+      } else {
+        // Classic 5x5 board: attempt RPC first, gracefully fallback to server route on error
+        const res = await supabase.rpc('set_player_board', {
+          p_game_id: game.id,
+          p_session_id: sessionId,
+          p_board: board,
+        });
 
-      if (res.error) {
-        const errMsg = (res.error.message || '').toLowerCase();
-        const isLegacyOrConstraint =
-          errMsg.includes('25') ||
-          errMsg.includes('could not find the function') ||
-          errMsg.includes('schema cache');
-
-        if (isLegacyOrConstraint) {
-          console.warn('[BingoDuel:Setup] Unmigrated DB stored procedure constraint. Falling back to server API route /api/game/board...');
+        if (res.error) {
           const apiRes = await fetch('/api/game/board', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1049,16 +1075,14 @@ export function useBingoGame(initialRoomCode?: string) {
           });
           const apiJson = await apiRes.json();
           if (!apiRes.ok || apiJson.error) {
-            throw new Error(apiJson.error || 'Failed to submit board via server');
+            throw new Error(apiJson.error || res.error.message || 'Failed to submit board via server');
           }
           rpcData = apiJson;
           rpcSuccess = true;
         } else {
-          throw res.error;
+          rpcData = res.data;
+          rpcSuccess = true;
         }
-      } else {
-        rpcData = res.data;
-        rpcSuccess = true;
       }
 
       // Trust server truth exclusively for allReady — never use stale refs (p1Ref/p2Ref) here.

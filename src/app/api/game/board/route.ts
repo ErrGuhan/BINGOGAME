@@ -93,12 +93,20 @@ export async function POST(req: NextRequest) {
 
       turnId = p1?.id || player.id;
 
-      // Update game status to playing
+      // Update game status to playing with target_lines and turn
       await supabase
         .from('games')
         .update({
           status: 'playing',
           current_turn_player_id: turnId,
+          target_lines: config.targetLines,
+        })
+        .eq('id', gameId);
+    } else {
+      // First player to lock: persist target_lines immediately so opponent's sync is in lockstep
+      await supabase
+        .from('games')
+        .update({
           target_lines: config.targetLines,
         })
         .eq('id', gameId);
