@@ -8,11 +8,9 @@ import { resolveGameVariant, validateBoardForVariant } from '@/lib/variantResolv
 import { sounds } from '@/components/AudioController';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { OfflineGameEngine, generateRoomCode } from '@/lib/offlineGameEngine';
-import { createBotDuelist, chooseBotNumber, BotDuelist } from '@/lib/offlineBot';
-import { IOfflineTransport, OfflineMessage } from '@/lib/offlineTransports/types';
+import { OfflineBridge } from '@/lib/offlineBridge';
+import { IOfflineTransport } from '@/lib/offlineTransports/types';
 import { WebRTCOfflineTransport } from '@/lib/offlineTransports/webrtcTransport';
-import { WiFiIpOfflineTransport } from '@/lib/offlineTransports/wifiIpTransport';
-import { BluetoothOfflineTransport } from '@/lib/offlineTransports/bluetoothTransport';
 import { OfflineConnectMode } from '@/components/OfflineConnectionModal';
 
 export function useBingoGame(initialRoomCode?: string) {
@@ -50,12 +48,10 @@ export function useBingoGame(initialRoomCode?: string) {
   const rematchStatusRef = useRef(rematchStatus);
   const calledNumbersRef = useRef<CalledNumber[]>([]);
 
-  // Offline Engine & Transport state
-  const offlineEngineRef = useRef<OfflineGameEngine | null>(null);
-  const offlineTransportRef = useRef<IOfflineTransport | null>(null);
+  // Offline Bridge & Mode state
+  const offlineBridgeRef = useRef<OfflineBridge | null>(null);
   const offlineModeRef = useRef<OfflineConnectMode | null>(null);
   const [offlineModeState, setOfflineModeState] = useState<OfflineConnectMode | null>(null);
-  const botDuelistRef = useRef<BotDuelist | null>(null);
   const [passAndPlayActivePlayerNumber, setPassAndPlayActivePlayerNumber] = useState<1 | 2>(1);
 
   // Reliable session getter
@@ -753,38 +749,7 @@ export function useBingoGame(initialRoomCode?: string) {
     return () => clearInterval(timer);
   }, [isOpponentDisconnected, game?.status]);
 
-  // Bot Turn Automation in Offline Mode
-  useEffect(() => {
-    if (
-      offlineModeRef.current === 'bot' &&
-      game?.status === 'playing' &&
-      botDuelistRef.current &&
-      offlineEngineRef.current &&
-      game.current_turn_player_id &&
-      p2?.id &&
-      game.current_turn_player_id === p2.id
-    ) {
-      const timer = setTimeout(() => {
-        try {
-          if (!offlineEngineRef.current || !botDuelistRef.current) return;
-          const num = chooseBotNumber(
-            botDuelistRef.current.board,
-            calledNumbersRef.current.map(c => c.number),
-            game.board_size
-          );
-          offlineEngineRef.current.callNumber(botDuelistRef.current.sessionId, num);
-          const snap = offlineEngineRef.current.getSnapshotForSession(getSession());
-          applySnapshot(snap);
-          sounds.playCall();
-        } catch (err) {
-          console.error('[BingoDuel:Bot] Bot turn error:', err);
-        }
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
-  }, [game?.status, game?.current_turn_player_id, p2?.id, game?.board_size, getSession, applySnapshot]);
-
-  // ACTION: Start Offline Duel (Bot, Pass & Play, Hotspot WebRTC P2P, Wi-Fi IP)
+  // ACTION: Start Offline Duel (Bot, Pass & Play, Hotspot WebRTC P2P)
   const startOfflineDuel = useCallback(async (mode: OfflineConnectMode, options: any = {}) => {
     setLoading(true);
     setError(null);
@@ -797,125 +762,52 @@ export function useBingoGame(initialRoomCode?: string) {
     offlineModeRef.current = mode;
     setOfflineModeState(mode);
 
+    if (!offlineBridgeRef.current) {
+      offlineBridgeRef.current = new OfflineBridge({
+        onSnapshot: (snap) => {
+          applySnapshot(snap);
+          if (offlineBridgeRef.current) {
+            setPassAndPlayActivePlayerNumber(offlineBridgeRef.current.getPassAndPlayPlayer());
+          }
+        },
+        onConnectionChange: (connected) => {
+          setIsOpponentDisconnected(!connected);
+        },
+        onError: (err) => {
+          setError(err.message);
+        },
+      });
+    }
+
+    const bridge = offlineBridgeRef.current;
+
     if (mode === 'bot') {
-      const engine = new OfflineGameEngine(sessionId, name, size);
-      offlineEngineRef.current = engine;
-      const bot = createBotDuelist(size);
-      botDuelistRef.current = bot;
-      engine.join(bot.sessionId, bot.displayName);
-      engine.setBoard(bot.sessionId, bot.board);
-      const snap = engine.getSnapshotForSession(sessionId);
-      applySnapshot(snap);
+      const roomCode = bridge.startBotMatch(sessionId, name, size);
+      setActiveRoomCode(roomCode);
       setLoading(false);
-      return snap.game.room_code;
+      return roomCode;
     }
 
     if (mode === 'pass-and-play') {
-      const engine = new OfflineGameEngine(sessionId, `${name} (P1)`, size);
-      offlineEngineRef.current = engine;
-      engine.join('pass-p2-session', 'Player 2');
+      const roomCode = bridge.startPassAndPlay(sessionId, name, size);
       setPassAndPlayActivePlayerNumber(1);
-      const snap = engine.getSnapshotForSession(sessionId);
-      applySnapshot(snap);
+      setActiveRoomCode(roomCode);
       setLoading(false);
-      return snap.game.room_code;
+      return roomCode;
     }
 
-    if (mode === 'webrtc') {
+    if (mode === 'p2p-hotspot' || mode === 'webrtc' || mode === 'wifi-ip') {
       if (options.role === 'host') {
-        const engine = new OfflineGameEngine(sessionId, name, size);
-        offlineEngineRef.current = engine;
         const transport = new WebRTCOfflineTransport(true);
-        offlineTransportRef.current = transport;
-
-        transport.onMessage((msg) => {
-          const payload = msg.payload as Record<string, any> | undefined;
-          if (msg.type === 'JOIN_REQUEST') {
-            engine.join(msg.sessionId, payload?.name || 'Challenger');
-            const snap = engine.getSnapshotForSession(sessionId);
-            applySnapshot(snap);
-            transport.send({ type: 'SYNC_STATE', sessionId, payload: snap, timestamp: Date.now() });
-          } else if (msg.type === 'SET_BOARD') {
-            engine.setBoard(msg.sessionId, payload?.board);
-            const snap = engine.getSnapshotForSession(sessionId);
-            applySnapshot(snap);
-            transport.send({ type: 'SYNC_STATE', sessionId, payload: snap, timestamp: Date.now() });
-          } else if (msg.type === 'CALL_NUMBER') {
-            engine.callNumber(msg.sessionId, payload?.number);
-            const snap = engine.getSnapshotForSession(sessionId);
-            applySnapshot(snap);
-            transport.send({ type: 'SYNC_STATE', sessionId, payload: snap, timestamp: Date.now() });
-          } else if (msg.type === 'REMATCH_ACCEPTED') {
-            engine.resetForRematch();
-            const snap = engine.getSnapshotForSession(sessionId);
-            applySnapshot(snap);
-            transport.send({ type: 'SYNC_STATE', sessionId, payload: snap, timestamp: Date.now() });
-          }
-        });
-
-        const snap = engine.getSnapshotForSession(sessionId);
-        applySnapshot(snap);
+        const roomCode = bridge.startP2PHost(sessionId, name, size, transport, options.targetCode);
+        setActiveRoomCode(roomCode);
         setLoading(false);
-        return snap.game.room_code;
+        return roomCode;
       } else {
         const transport = new WebRTCOfflineTransport(false);
-        offlineTransportRef.current = transport;
-        transport.onMessage((msg) => {
-          if (msg.type === 'SYNC_STATE') {
-            applySnapshot(msg.payload as GameStateSnapshot);
-          }
-        });
+        bridge.startP2PJoin(sessionId, name, transport);
         setLoading(false);
-        return 'JOIN';
-      }
-    }
-
-    if (mode === 'wifi-ip') {
-      const roomCode = options.targetCode || generateRoomCode();
-      const transport = new WiFiIpOfflineTransport(roomCode);
-      offlineTransportRef.current = transport;
-
-      if (options.role === 'host') {
-        const engine = new OfflineGameEngine(sessionId, name, size, roomCode);
-        offlineEngineRef.current = engine;
-        transport.onMessage((msg) => {
-          const payload = msg.payload as Record<string, any> | undefined;
-          if (msg.type === 'JOIN_REQUEST') {
-            engine.join(msg.sessionId, payload?.name || 'Challenger');
-            const snap = engine.getSnapshotForSession(sessionId);
-            applySnapshot(snap);
-            transport.send({ type: 'SYNC_STATE', sessionId, payload: snap, timestamp: Date.now() });
-          } else if (msg.type === 'SET_BOARD') {
-            engine.setBoard(msg.sessionId, payload?.board);
-            const snap = engine.getSnapshotForSession(sessionId);
-            applySnapshot(snap);
-            transport.send({ type: 'SYNC_STATE', sessionId, payload: snap, timestamp: Date.now() });
-          } else if (msg.type === 'CALL_NUMBER') {
-            engine.callNumber(msg.sessionId, payload?.number);
-            const snap = engine.getSnapshotForSession(sessionId);
-            applySnapshot(snap);
-            transport.send({ type: 'SYNC_STATE', sessionId, payload: snap, timestamp: Date.now() });
-          } else if (msg.type === 'REMATCH_ACCEPTED') {
-            engine.resetForRematch();
-            const snap = engine.getSnapshotForSession(sessionId);
-            applySnapshot(snap);
-            transport.send({ type: 'SYNC_STATE', sessionId, payload: snap, timestamp: Date.now() });
-          }
-        });
-
-        const snap = engine.getSnapshotForSession(sessionId);
-        applySnapshot(snap);
-        setLoading(false);
-        return roomCode;
-      } else {
-        transport.onMessage((msg) => {
-          if (msg.type === 'SYNC_STATE') {
-            applySnapshot(msg.payload as GameStateSnapshot);
-          }
-        });
-        transport.send({ type: 'JOIN_REQUEST', sessionId, payload: { name }, timestamp: Date.now() });
-        setLoading(false);
-        return roomCode;
+        return options.targetCode || 'JOIN';
       }
     }
 
@@ -1093,10 +985,8 @@ export function useBingoGame(initialRoomCode?: string) {
     try {
       const cleanCode = roomCode.trim().toUpperCase();
 
-      if (offlineEngineRef.current) {
-        offlineEngineRef.current.join(sessionId, name);
-        const snap = offlineEngineRef.current.getSnapshotForSession(sessionId);
-        applySnapshot(snap);
+      if (offlineBridgeRef.current) {
+        offlineBridgeRef.current.getEngine()?.join(sessionId, name);
         setActiveRoomCode(cleanCode);
         setLoading(false);
         return;
@@ -1105,7 +995,7 @@ export function useBingoGame(initialRoomCode?: string) {
       const supabase = getSupabase();
       if (!supabase || !isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) {
         console.warn('[BingoDuel] Offline or Supabase not configured — joining local offline match.');
-        await startOfflineDuel('wifi-ip', { role: 'join', targetCode: cleanCode });
+        await startOfflineDuel('p2p-hotspot', { role: 'join', targetCode: cleanCode });
         return;
       }
 
@@ -1228,29 +1118,9 @@ export function useBingoGame(initialRoomCode?: string) {
     }
 
     // Offline Authority / Transport Handling
-    if (offlineEngineRef.current) {
-      const activeSession = (offlineModeRef.current === 'pass-and-play' && passAndPlayActivePlayerNumber === 2)
-        ? (p2?.session_id || 'pass-p2-session')
-        : sessionId;
-      offlineEngineRef.current.setBoard(activeSession, board);
-      const snap = offlineEngineRef.current.getSnapshotForSession(sessionId);
-      applySnapshot(snap);
-      if (offlineTransportRef.current?.isConnected) {
-        offlineTransportRef.current.send({
-          type: 'SYNC_STATE',
-          sessionId,
-          payload: snap,
-          timestamp: Date.now(),
-        });
-      }
-      return;
-    } else if (offlineTransportRef.current) {
-      offlineTransportRef.current.send({
-        type: 'SET_BOARD',
-        sessionId,
-        payload: { board },
-        timestamp: Date.now(),
-      });
+    if (offlineBridgeRef.current) {
+      offlineBridgeRef.current.setBoard(sessionId, board);
+      setPassAndPlayActivePlayerNumber(offlineBridgeRef.current.getPassAndPlayPlayer());
       return;
     }
 
@@ -1396,32 +1266,9 @@ export function useBingoGame(initialRoomCode?: string) {
     const sessionId = getSession();
 
     // Offline Authority / Transport Handling
-    if (offlineEngineRef.current) {
-      const activeSession = (offlineModeRef.current === 'pass-and-play' && passAndPlayActivePlayerNumber === 2)
-        ? (p2?.session_id || 'pass-p2-session')
-        : sessionId;
-      offlineEngineRef.current.callNumber(activeSession, number);
-      const snap = offlineEngineRef.current.getSnapshotForSession(sessionId);
-      applySnapshot(snap);
-      if (offlineModeRef.current === 'pass-and-play') {
-        setPassAndPlayActivePlayerNumber(prev => (prev === 1 ? 2 : 1));
-      }
-      if (offlineTransportRef.current?.isConnected) {
-        offlineTransportRef.current.send({
-          type: 'SYNC_STATE',
-          sessionId,
-          payload: snap,
-          timestamp: Date.now(),
-        });
-      }
-      return;
-    } else if (offlineTransportRef.current) {
-      offlineTransportRef.current.send({
-        type: 'CALL_NUMBER',
-        sessionId,
-        payload: { number },
-        timestamp: Date.now(),
-      });
+    if (offlineBridgeRef.current) {
+      offlineBridgeRef.current.callNumber(sessionId, number);
+      setPassAndPlayActivePlayerNumber(offlineBridgeRef.current.getPassAndPlayPlayer());
       return;
     }
 
@@ -1725,25 +1572,11 @@ export function useBingoGame(initialRoomCode?: string) {
     const currentTarget = currentBoardSize === 10 ? 10 : 5;
     const myName = player?.display_name || getPlayerName();
 
-    if (offlineEngineRef.current) {
-      offlineEngineRef.current.resetForRematch();
-      if (offlineModeRef.current === 'bot' && botDuelistRef.current) {
-        botDuelistRef.current = createBotDuelist(game.board_size || 5);
-        offlineEngineRef.current.setBoard(botDuelistRef.current.sessionId, botDuelistRef.current.board);
-      }
-      const snap = offlineEngineRef.current.getSnapshotForSession(sessionId);
-      applySnapshot(snap);
+    if (offlineBridgeRef.current) {
+      offlineBridgeRef.current.acceptRematch(sessionId);
       setRematchStatus('idle');
       setRematchRequesterName(null);
-      if (offlineTransportRef.current?.isConnected) {
-        offlineTransportRef.current.send({
-          type: 'SYNC_STATE',
-          sessionId,
-          payload: snap,
-          timestamp: Date.now(),
-        });
-      }
-      onRematchAcceptedRef.current?.(snap.game.room_code);
+      onRematchAcceptedRef.current?.(game.room_code);
       setLoading(false);
       return;
     }
@@ -1844,9 +1677,13 @@ export function useBingoGame(initialRoomCode?: string) {
   // ACTION: Request Rematch (Sends challenge notification to opponent)
   const requestRematch = useCallback(async () => {
     if (!game?.id) return;
-    // In local bot or pass-and-play mode, rematch requests immediately accept!
-    if (offlineModeRef.current === 'bot' || offlineModeRef.current === 'pass-and-play') {
-      return acceptRematch();
+    if (offlineBridgeRef.current) {
+      offlineBridgeRef.current.requestRematch(getSession());
+      if (offlineModeRef.current === 'bot' || offlineModeRef.current === 'pass-and-play') {
+        setRematchStatus('idle');
+        onRematchAcceptedRef.current?.(game.room_code);
+      }
+      return;
     }
     // If we already received a request from opponent, clicking rematch accepts it!
     if (rematchStatus === 'received') {
@@ -1855,13 +1692,7 @@ export function useBingoGame(initialRoomCode?: string) {
     setRematchStatus('requesting');
     setLoading(true);
     try {
-      if (offlineTransportRef.current?.isConnected) {
-        offlineTransportRef.current.send({
-          type: 'REMATCH_REQUEST',
-          sessionId: getSession(),
-          timestamp: Date.now(),
-        });
-      } else if (channelRef.current) {
+      if (channelRef.current) {
         channelRef.current.send({
           type: 'broadcast',
           event: 'REMATCH_REQUESTED',
@@ -1883,6 +1714,10 @@ export function useBingoGame(initialRoomCode?: string) {
     setRematchStatus('idle');
     setRematchRequesterName(null);
     sounds.playTap();
+    if (offlineBridgeRef.current) {
+      offlineBridgeRef.current.declineRematch(getSession());
+      return;
+    }
     if (channelRef.current && game?.id) {
       channelRef.current.send({
         type: 'broadcast',
@@ -1974,12 +1809,10 @@ export function useBingoGame(initialRoomCode?: string) {
       setIsOpponentDisconnected(false);
       setRematchStatus('idle');
       setRematchRequesterName(null);
-      offlineEngineRef.current = null;
-      offlineTransportRef.current?.disconnect();
-      offlineTransportRef.current = null;
+      offlineBridgeRef.current?.destroy();
+      offlineBridgeRef.current = null;
       offlineModeRef.current = null;
       setOfflineModeState(null);
-      botDuelistRef.current = null;
       setPassAndPlayActivePlayerNumber(1);
     },
   };

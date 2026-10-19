@@ -27,12 +27,14 @@ export function decompressSignal(str: string): RTCSessionDescriptionInit {
 }
 
 export class WebRTCOfflineTransport implements IOfflineTransport {
-  public readonly type = 'webrtc';
+  public readonly type = 'p2p-hotspot';
   private pc: RTCPeerConnection | null = null;
   private dc: RTCDataChannel | null = null;
   private messageHandlers: Array<(msg: OfflineMessage) => void> = [];
   private connectionHandlers: Array<(connected: boolean) => void> = [];
   private _isConnected = false;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private lastHeartbeatAt = Date.now();
 
   public get isConnected(): boolean {
     return this._isConnected;
@@ -40,7 +42,7 @@ export class WebRTCOfflineTransport implements IOfflineTransport {
 
   constructor(private isHost: boolean) {
     if (typeof window !== 'undefined' && window.RTCPeerConnection) {
-      // Local offline LAN/Hotspot configuration — no public STUN server required
+      // Local offline LAN/Hotspot configuration — zero public STUN server requirement
       this.pc = new RTCPeerConnection({
         iceServers: [],
       });
@@ -82,21 +84,36 @@ export class WebRTCOfflineTransport implements IOfflineTransport {
     this.dc = channel;
 
     this.dc.onopen = () => {
+      this.lastHeartbeatAt = Date.now();
       this.updateConnectedState(true);
+      this.startHeartbeat();
     };
 
     this.dc.onclose = () => {
+      this.stopHeartbeat();
       this.updateConnectedState(false);
     };
 
     this.dc.onerror = err => {
       console.warn('[WebRTCOfflineTransport] Data channel error:', err);
+      this.stopHeartbeat();
       this.updateConnectedState(false);
     };
 
     this.dc.onmessage = event => {
       try {
         const parsed: OfflineMessage = JSON.parse(event.data);
+        this.lastHeartbeatAt = Date.now();
+
+        // Handle internal heartbeat messages without propagating to game logic
+        if (parsed.type === 'PING') {
+          this.send({ type: 'PONG', sessionId: 'system', timestamp: Date.now() });
+          return;
+        }
+        if (parsed.type === 'PONG') {
+          return;
+        }
+
         for (const handler of this.messageHandlers) {
           handler(parsed);
         }
@@ -104,6 +121,31 @@ export class WebRTCOfflineTransport implements IOfflineTransport {
         console.error('[WebRTCOfflineTransport] Failed to parse message:', err);
       }
     };
+  }
+
+  private startHeartbeat() {
+    this.stopHeartbeat();
+    this.pingTimer = setInterval(() => {
+      if (!this._isConnected || !this.dc || this.dc.readyState !== 'open') {
+        return;
+      }
+
+      // Check if peer timed out (no heartbeat for 12 seconds)
+      if (Date.now() - this.lastHeartbeatAt > 12000) {
+        console.warn('[WebRTCOfflineTransport] Peer heartbeat timeout. Disconnecting...');
+        this.updateConnectedState(false);
+        return;
+      }
+
+      this.send({ type: 'PING', sessionId: 'system', timestamp: Date.now() });
+    }, 4000);
+  }
+
+  private stopHeartbeat() {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
   }
 
   private updateConnectedState(connected: boolean) {
@@ -124,7 +166,7 @@ export class WebRTCOfflineTransport implements IOfflineTransport {
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
 
-    // Wait for ICE gathering to complete on local network
+    // Wait for ICE gathering to complete on local hotspot/network
     await this.waitForIceGathering();
 
     return compressSignal(this.pc.localDescription);
@@ -188,7 +230,11 @@ export class WebRTCOfflineTransport implements IOfflineTransport {
       console.warn('[WebRTCOfflineTransport] Cannot send: data channel not open');
       return;
     }
-    this.dc.send(JSON.stringify(message));
+    try {
+      this.dc.send(JSON.stringify(message));
+    } catch (err) {
+      console.error('[WebRTCOfflineTransport] Send error:', err);
+    }
   }
 
   public onMessage(callback: (message: OfflineMessage) => void): void {
@@ -200,6 +246,7 @@ export class WebRTCOfflineTransport implements IOfflineTransport {
   }
 
   public disconnect(): void {
+    this.stopHeartbeat();
     try {
       this.dc?.close();
       this.pc?.close();

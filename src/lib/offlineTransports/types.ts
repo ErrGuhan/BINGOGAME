@@ -1,4 +1,4 @@
-export type OfflineTransportType = 'webrtc' | 'wifi-ip' | 'bluetooth' | 'pass-and-play' | 'bot';
+export type OfflineTransportType = 'p2p-hotspot' | 'webrtc' | 'bot' | 'pass-and-play';
 
 export type OfflineMessageType =
   | 'JOIN_REQUEST'
