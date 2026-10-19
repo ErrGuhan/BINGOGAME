@@ -159,23 +159,38 @@
       </svg>
     </div>
 
-    <h1>You're Offline</h1>
+    <h1>Offline Mode Available</h1>
     <div class="divider"></div>
-    <p>BingoDuel needs an internet connection for real-time matches. Connect to Wi-Fi or mobile data to continue dueling.</p>
+    <p>No internet connection detected, but you can duel completely offline via Local Hotspot, Wi-Fi IP, Bluetooth, or Pass & Play!</p>
 
-    <button
-      class="try-again-btn"
-      onclick="window.location.reload()"
-      aria-label="Try again"
-    >
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <polyline points="1 4 1 10 7 10"/>
-        <path d="M3.51 15a9 9 0 1 0 .49-3.77"/>
-      </svg>
-      Try Again
-    </button>
+    <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;">
+      <a
+        href="/"
+        class="try-again-btn"
+        aria-label="Launch Offline Game"
+        style="text-decoration: none;"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        Launch Offline Arena
+      </a>
 
-    <span class="hint">If you were in a match, return to the game once you're back online.</span>
+      <button
+        class="try-again-btn"
+        onclick="window.location.reload()"
+        aria-label="Try again"
+        style="background: rgba(255,255,255,0.1); color: #fff; box-shadow: none;"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="1 4 1 10 7 10"/>
+          <path d="M3.51 15a9 9 0 1 0 .49-3.77"/>
+        </svg>
+        Try Online Again
+      </button>
+    </div>
+
+    <span class="hint">Install the app to your home screen for instant 100% offline access anytime.</span>
   </div>
 </body>
 </html>

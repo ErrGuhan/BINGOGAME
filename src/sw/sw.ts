@@ -1,5 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // src/sw/sw.ts
-// BingoDuel Service Worker — Workbox-powered caching with surgical Supabase exclusions.
+// BingoDuel Service Worker — Workbox-powered offline caching with surgical exclusions.
 // This file is compiled by scripts/build-sw.mjs after `next build`.
 // DO NOT import from src/ here — this runs in the SW context, not Next.js.
 
@@ -20,8 +21,6 @@ import { ExpirationPlugin } from 'workbox-expiration';
 declare const self: any;
 
 // ─── Cache versioning ──────────────────────────────────────────────────────────
-// __BUILD_ID__ is replaced by scripts/build-sw.mjs with the actual Next.js build ID.
-// Every new Vercel deploy → new build ID → old caches are invalidated automatically.
 const CACHE_VERSION = '__BUILD_ID__';
 const CACHE_PREFIX = 'bingoduel';
 
@@ -33,12 +32,9 @@ clientsClaim();
 cleanupOutdatedCaches();
 
 // ─── Precache Next.js static assets (hashed filenames — safe to cache forever) ─
-// The __WB_MANIFEST array is injected by workbox-build.injectManifest().
 precacheAndRoute(self.__WB_MANIFEST || []);
 
 // ─── NetworkOnly: Supabase (REST + Realtime WebSocket) ────────────────────────
-// CRITICAL: Supabase traffic must NEVER be intercepted by the service worker.
-// The Realtime WebSocket in particular will break if proxied through the SW.
 const supabaseHostname = 'tbdnklpyjsxvdgeajigu.supabase.co';
 
 registerRoute(
@@ -46,14 +42,26 @@ registerRoute(
   new NetworkOnly()
 );
 
-// ─── NetworkOnly: Next.js API routes ──────────────────────────────────────────
+// ─── NetworkFirst with Offline Mock: Next.js API routes ───────────────────────
+// In offline mode, if the API call fails because network is down, return a safe JSON fallback
 registerRoute(
   ({ url }: { url: URL }) => url.pathname.startsWith('/api/'),
-  new NetworkOnly()
+  async ({ request }: { request: Request }) => {
+    try {
+      return await fetch(request);
+    } catch {
+      return new Response(
+        JSON.stringify({ offline: true, success: true, message: 'Running in offline mode' }),
+        {
+          headers: { 'Content-Type': 'application/json' },
+          status: 200,
+        }
+      );
+    }
+  }
 );
 
 // ─── CacheFirst: Next.js static bundle files ──────────────────────────────────
-// These files have content-hashes in their names and are safe to cache indefinitely.
 registerRoute(
   ({ url }: { url: URL }) => url.pathname.startsWith('/_next/static/'),
   new CacheFirst({
@@ -109,41 +117,52 @@ registerRoute(
   })
 );
 
-// ─── NetworkFirst: HTML navigation (app shell) ────────────────────────────────
-// Always tries the network first. Falls back to cached version or offline page.
-// This ensures game routes always get fresh HTML from the server.
+// ─── NetworkFirst with App Shell Offline Fallback ─────────────────────────────
+// When user opens the app offline, serve the cached root app shell so the game
+// boots up immediately with full offline gameplay!
+const navigationStrategy = new NetworkFirst({
+  cacheName: `${CACHE_PREFIX}-navigation-${CACHE_VERSION}`,
+  networkTimeoutSeconds: 3,
+  plugins: [
+    new ExpirationPlugin({
+      maxEntries: 16,
+      maxAgeSeconds: 24 * 60 * 60, // 1 day
+    }),
+  ],
+});
+
 registerRoute(
   new NavigationRoute(
-    new NetworkFirst({
-      cacheName: `${CACHE_PREFIX}-navigation-${CACHE_VERSION}`,
-      networkTimeoutSeconds: 5,
-      plugins: [
-        new ExpirationPlugin({
-          maxEntries: 16,
-          maxAgeSeconds: 24 * 60 * 60, // 1 day
-        }),
-      ],
-    }),
+    async (params: any) => {
+      try {
+        const response = await navigationStrategy.handle(params);
+        if (response) return response;
+      } catch {}
+
+      // Fallback: Return cached app shell or offline page
+      const cache = await caches.open(`${CACHE_PREFIX}-navigation-${CACHE_VERSION}`);
+      const cachedApp = (await cache.match('/')) || (await cache.match(params.request));
+      if (cachedApp) return cachedApp;
+
+      const offlineCache = await caches.open(`${CACHE_PREFIX}-offline`);
+      return (await offlineCache.match('/offline.html')) || Response.error();
+    },
     {
-      // Never intercept Supabase URLs with the navigation route
       denylist: [new RegExp(supabaseHostname)],
     }
   )
 );
 
-// ─── Offline fallback ─────────────────────────────────────────────────────────
-// When NetworkFirst navigation fails (truly offline), serve the offline page.
-// The offline.html is precached separately so it's always available.
+// ─── Precache App Shell & Offline fallback on install ─────────────────────────
 self.addEventListener('install', (event: any) => {
   event.waitUntil(
     caches.open(`${CACHE_PREFIX}-offline`).then((cache: any) =>
-      cache.addAll(['/offline.html'])
+      cache.addAll(['/', '/offline.html', '/favicon.ico'])
     )
   );
 });
 
 // ─── Broadcast SW_UPDATED to all clients when this SW activates ───────────────
-// The PWAContext in the app listens for this and shows the "New version" toast.
 self.addEventListener('activate', (event: any) => {
   event.waitUntil(
     (async () => {
@@ -155,7 +174,7 @@ self.addEventListener('activate', (event: any) => {
   );
 });
 
-// ─── Handle SKIP_WAITING message from the update toast ────────────────────────
+// ─── Handle SKIP_WAITING message ──────────────────────────────────────────────
 self.addEventListener('message', (event: any) => {
   if (event.data?.type === 'SKIP_WAITING') {
     self.skipWaiting();

@@ -11,6 +11,8 @@ import { VictoryScreen } from '@/components/VictoryScreen';
 import { ReconnectingModal } from '@/components/ReconnectingModal';
 import { LeaderboardScreen } from '@/components/LeaderboardScreen';
 import { ConnectionHandshakeModal } from '@/components/ConnectionHandshakeModal';
+import { OfflineConnectionModal, OfflineConnectMode } from '@/components/OfflineConnectionModal';
+import { InstallAppModal } from '@/components/InstallAppModal';
 import { useBingoGame } from '@/hooks/useBingoGame';
 import { sounds } from '@/components/AudioController';
 import { getActiveRoomCode, clearActiveRoomCode } from '@/lib/gameEngine';
@@ -23,6 +25,8 @@ export default function App() {
   const [prefilledJoinCode, setPrefilledJoinCode] = useState<string>('');
   const [showDebugHud, setShowDebugHud] = useState<boolean>(false);
   const [showHandshake, setShowHandshake] = useState<boolean>(false);
+  const [showOfflineModal, setShowOfflineModal] = useState<boolean>(false);
+  const [showInstallModal, setShowInstallModal] = useState<boolean>(false);
 
   const {
     game,
@@ -60,6 +64,11 @@ export default function App() {
     resetGame,
     setOnRematchDeclined,
     setOnRematchAccepted,
+    isOfflineMode,
+    offlineMode,
+    startOfflineDuel,
+    passAndPlayActivePlayerNumber,
+    switchPassAndPlayPlayer,
   } = useBingoGame();
 
   // Auto-restore active game room on initial mount
@@ -73,7 +82,7 @@ export default function App() {
         .catch((err) => {
           console.warn('Auto-reconnect failed for saved room:', savedRoom, err);
           clearActiveRoomCode();
-          resetGame(); // Ensure home screen is completely clean without a phantom error banner
+          resetGame();
         });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -99,7 +108,6 @@ export default function App() {
       if (player?.board) {
         setScreen('game');
       } else {
-        // Keep player on setup until their board is locked
         if (screen !== 'setup') {
           setScreen('setup');
         }
@@ -111,13 +119,11 @@ export default function App() {
     }
   }, [game?.status, player?.is_ready, player?.player_number, player?.board, screen, rematchStatus]);
 
-  // Register rematch event callbacks (avoids React state-batching race conditions)
+  // Register rematch event callbacks
   React.useEffect(() => {
-    // When opponent ACCEPTS our rematch request — go to board setup for the new match
     setOnRematchAccepted(() => (_newRoomCode?: string) => {
       setScreen('setup');
     });
-    // When opponent DECLINES our rematch request — clean up and go home
     setOnRematchDeclined(() => () => {
       sounds.playAlert();
       clearActiveRoomCode();
@@ -168,6 +174,23 @@ export default function App() {
     }
   };
 
+  // Handle Offline Duel launch
+  const handleStartOfflineDuel = async (mode: OfflineConnectMode, options?: any) => {
+    try {
+      clearActiveRoomCode();
+      const code = await startOfflineDuel(mode, options);
+      if (mode === 'bot' || mode === 'pass-and-play') {
+        setScreen('setup');
+      } else if (options?.role === 'host') {
+        setScreen('create');
+      } else {
+        setShowHandshake(true);
+      }
+    } catch (err) {
+      console.error('Failed to start offline duel:', err);
+    }
+  };
+
   // Handle Create -> Proceed to Setup
   const handleProceedToSetup = (autoFill: boolean) => {
     setAutoFillBoard(autoFill);
@@ -178,6 +201,11 @@ export default function App() {
   const handleBoardConfirmed = async (boardData: number[]) => {
     try {
       await setBoard(boardData);
+      if (offlineMode === 'pass-and-play' && passAndPlayActivePlayerNumber === 1 && !p2?.board) {
+        switchPassAndPlayPlayer();
+        sounds.playDraft(880);
+        return;
+      }
       if (game?.status === 'playing') {
         setScreen('game');
       }
@@ -186,7 +214,7 @@ export default function App() {
     }
   };
 
-  // Handle Rematch (sends challenge request to opponent)
+  // Handle Rematch
   const handleRematch = async () => {
     sounds.playTap();
     try {
@@ -206,17 +234,17 @@ export default function App() {
 
   // Compute Header parameters
   const headerConfig = {
-    home: { badge: 'LIVE', badgeType: 'live' as const, subTitle: 'Home', showBack: false },
-    create: { badge: 'LIVE', badgeType: 'create' as const, subTitle: 'Create', showBack: true },
-    join: { badge: 'LIVE', badgeType: 'live' as const, subTitle: 'Join', showBack: true },
+    home: { badge: isOfflineMode ? 'OFFLINE' : 'LIVE', badgeType: 'live' as const, subTitle: 'Home', showBack: false },
+    create: { badge: isOfflineMode ? 'OFFLINE' : 'LIVE', badgeType: 'create' as const, subTitle: 'Create', showBack: true },
+    join: { badge: isOfflineMode ? 'OFFLINE' : 'LIVE', badgeType: 'live' as const, subTitle: 'Join', showBack: true },
     setup: { badge: 'MATCH', badgeType: 'setup' as const, subTitle: 'Setup', showBack: true },
-    game: { badge: 'MATCH', badgeType: 'match' as const, subTitle: 'Game', showBack: false },
+    game: { badge: isOfflineMode ? 'LOCAL' : 'MATCH', badgeType: 'match' as const, subTitle: 'Game', showBack: false },
     victory: { badge: 'MATCH', badgeType: 'match' as const, subTitle: 'Gameover', showBack: false },
     leaderboard: { badge: 'LIVE', badgeType: 'live' as const, subTitle: 'Leaderboard', showBack: true },
   }[screen];
 
   const hostPlayerName = p1?.display_name || 'Host';
-  const guestPlayerName = p2?.display_name || 'Challenger';
+  const guestPlayerName = p2?.display_name || (offlineMode === 'bot' ? 'CyberDuelist [AI]' : 'Challenger');
   const opponentName = opponent?.display_name || (player?.player_number === 1 ? guestPlayerName : hostPlayerName);
 
   return (
@@ -235,6 +263,8 @@ export default function App() {
             onCreateGame={handleStartCreate}
             onJoinGame={handleStartJoin}
             onLeaderboard={() => { sounds.playTap(); setScreen('leaderboard'); }}
+            onOpenOfflineModal={() => setShowOfflineModal(true)}
+            onOpenInstallModal={() => setShowInstallModal(true)}
             loading={loading}
             errorMessage={error}
           />
@@ -243,8 +273,8 @@ export default function App() {
         {screen === 'create' && (
           <CreateGameScreen
             roomCode={game?.room_code || '....'}
-            opponentConnected={Boolean(p2?.connected)}
-            opponentName={p2?.display_name || 'Challenger'}
+            opponentConnected={Boolean(p2?.connected) || Boolean(p2?.id)}
+            opponentName={opponentName}
             boardSize={boardSize}
             onSwitchMode={setGameMode}
             onProceedToSetup={handleProceedToSetup}
@@ -277,20 +307,14 @@ export default function App() {
 
         {screen === 'setup' && (
           <BoardSetupScreen
-            key={`setup_${game?.id || 'room'}_${game?.status}_${rematchStatus}_${boardSize}`}
+            key={`setup_${game?.id || 'room'}_${game?.status}_${rematchStatus}_${boardSize}_${passAndPlayActivePlayerNumber}`}
             boardSize={boardSize}
             targetLines={targetLines}
+            initialAutoFill={autoFillBoard}
             isHost={player?.player_number === 1}
             onSwitchMode={setGameMode}
-            initialAutoFill={autoFillBoard}
             onConfirmBoard={handleBoardConfirmed}
-            onBack={() => {
-              if (player?.player_number === 1) {
-                setScreen('create');
-              } else {
-                handleBackToHome();
-              }
-            }}
+            onBack={handleBackToHome}
             loading={loading}
             isReady={Boolean(player?.is_ready)}
             opponentName={opponentName}
@@ -298,73 +322,60 @@ export default function App() {
           />
         )}
 
-        {screen === 'game' && (
-          player?.board ? (
+        {screen === 'game' && player?.board && (
+          <div className="flex flex-col gap-2">
+            {offlineMode === 'pass-and-play' && (
+              <div className="w-full py-1.5 px-3 rounded-xl bg-primary-container/20 border border-primary-container/40 text-center text-xs font-bold text-primary-container">
+                📱 Pass & Play Mode · Current Turn: {isMyTurn ? (player?.display_name || 'Player 1') : (opponentName || 'Player 2')}
+              </div>
+            )}
             <MainGameScreen
               board={player.board}
               calledNumbers={calledNumbers}
               isMyTurn={isMyTurn}
               myLines={myLines}
-              boardSize={boardSize}
-              targetLines={targetLines}
               playerName={player.display_name}
               opponentName={opponentName}
               onCallNumber={callNumber}
               loading={loading}
               optimisticCalled={optimisticCalled}
+              boardSize={boardSize}
+              targetLines={targetLines}
               errorMessage={error}
             />
-          ) : (
-            <div className="flex flex-col items-center justify-center p-12 text-center">
-              <span className="w-10 h-10 border-4 border-primary-container border-t-transparent rounded-full animate-spin mb-4" />
-              <p className="text-on-surface-variant font-bold text-sm">Entering Duel Arena...</p>
-            </div>
-          )
+          </div>
         )}
 
         {screen === 'victory' && (
           <VictoryScreen
+            winnerName={winner?.display_name || (isWinner ? player?.display_name || 'You' : opponentName)}
             isWinner={isWinner}
-            winnerName={winner?.display_name || 'Winner'}
-            playerName={player?.display_name || 'You'}
+            playerName={player?.display_name || 'Duelist'}
             opponentName={opponentName}
             myLines={myLines}
             opponentLines={opponentLines}
-            totalCalls={calledNumbers.length}
-            boardSize={boardSize}
             targetLines={targetLines}
+            boardSize={boardSize}
+            totalCalls={calledNumbers.length}
+            onRematch={handleRematch}
+            onBackToHome={handleBackToHome}
             rematchStatus={rematchStatus}
             rematchRequesterName={rematchRequesterName}
-            onRematch={handleRematch}
-            onAcceptRematch={async () => {
-              try {
-                await acceptRematch();
-              } catch (err) {
-                console.error('Failed to accept rematch:', err);
-              }
-              setScreen('setup');
-            }}
-            onDeclineRematch={() => {
-              declineRematch();
-              clearActiveRoomCode();
-              resetGame();
-              setScreen('home');
-            }}
+            onAcceptRematch={acceptRematch}
+            onDeclineRematch={declineRematch}
             onCancelRematchRequest={cancelRematchRequest}
-            onBackToHome={handleBackToHome}
           />
         )}
 
         {screen === 'leaderboard' && (
           <LeaderboardScreen
-            onBack={() => { sounds.playTap(); setScreen('home'); }}
+            onBack={handleBackToHome}
           />
         )}
 
-        {/* Connection Interrupted / Reconnecting Overlay */}
-        {isOpponentDisconnected && game?.status === 'playing' && (
+        {isOpponentDisconnected && !isOfflineMode && (
           <ReconnectingModal
-            roomCode={game.room_code}
+            roomCode={game?.room_code || '....'}
             opponentName={opponentName}
             countdown={reconnectCountdown}
             onClaimTimeoutWin={claimTimeoutWin}
@@ -372,46 +383,18 @@ export default function App() {
           />
         )}
 
-        {/* Realtime Synchronization Debug Instrumentation HUD */}
-        <aside aria-label="Realtime Sync Debug HUD" className="fixed bottom-3 right-3 z-50 flex flex-col items-end">
-          {showDebugHud && (
-            <div className="mb-2 p-3 rounded-2xl bg-surface-container/95 backdrop-blur-xl border border-outline-variant shadow-xl text-[11px] font-mono text-on-surface w-72 space-y-1.5 animate-in fade-in slide-in-from-bottom-2">
-              <div className="flex items-center justify-between border-b border-outline-variant pb-1 font-semibold text-xs">
-                <span className="text-primary-container">SYNC DIAGNOSTICS</span>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                  channelStatus === 'SUBSCRIBED'
-                    ? 'bg-secondary-container/10 text-secondary-container border border-secondary-container/30'
-                    : channelStatus === 'CONNECTING'
-                    ? 'bg-tertiary-container/10 text-tertiary-fixed border border-tertiary-fixed/30'
-                    : 'bg-error-container text-on-error-container border border-error/30'
-                }`}>
-                  {channelStatus}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-1 text-[10px]">
-                <div><span className="text-on-surface-variant font-medium">Room:</span> <span className="font-semibold">{game?.room_code || 'None'}</span></div>
-                <div><span className="text-on-surface-variant font-medium">Status:</span> <span className="font-semibold">{game?.status || 'idle'}</span></div>
-                <div className="col-span-2 truncate"><span className="text-on-surface-variant font-medium">GameID:</span> <span className="font-semibold">{activeGameId ? activeGameId.slice(0, 13) + '...' : 'none'}</span></div>
-                <div><span className="text-on-surface-variant font-medium">P1:</span> <span className="font-semibold">{p1?.is_ready ? '✓ LOCKED' : '○ WAIT'}</span></div>
-                <div><span className="text-on-surface-variant font-medium">P2:</span> <span className="font-semibold">{p2?.is_ready ? '✓ LOCKED' : '○ WAIT'}</span></div>
-                <div><span className="text-on-surface-variant font-medium">My Board:</span> <span className="font-semibold">{player?.board ? `${player.board.length} cells` : 'none'}</span></div>
-                <div><span className="text-on-surface-variant font-medium">Calls:</span> <span className="font-semibold">{calledNumbers.length}</span></div>
-                <div className="col-span-2"><span className="text-on-surface-variant font-medium">Turn:</span> <span className={`font-semibold ${isMyTurn ? 'text-primary-container' : 'text-on-surface-variant'}`}>{isMyTurn ? 'YOUR TURN' : 'OPPONENT TURN'}</span></div>
-              </div>
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={() => setShowDebugHud(prev => !prev)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container/90 hover:bg-surface-container-high backdrop-blur-md text-[11px] font-semibold text-on-surface border border-outline-variant shadow-xs cursor-pointer transition-all active:scale-95"
-            title="Toggle Multiplayer Sync HUD"
-          >
-            <span className={`w-2 h-2 rounded-full ${
-              channelStatus === 'SUBSCRIBED' ? 'bg-secondary-container animate-pulse' : channelStatus === 'CONNECTING' ? 'bg-amber-400' : 'bg-red-500'
-            }`} />
-            <span>SYNC HUD</span>
-          </button>
-        </aside>
+        {/* Offline Connection Modal */}
+        <OfflineConnectionModal
+          isOpen={showOfflineModal}
+          onClose={() => setShowOfflineModal(false)}
+          onStartOfflineDuel={handleStartOfflineDuel}
+        />
+
+        {/* PWA Download / Install App Modal */}
+        <InstallAppModal
+          isOpen={showInstallModal}
+          onClose={() => setShowInstallModal(false)}
+        />
       </main>
     </>
   );

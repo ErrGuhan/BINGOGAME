@@ -31,6 +31,8 @@ interface PWAContextValue {
   isIOS: boolean;
   /** True if the user has dismissed the iOS install banner */
   iosBannerDismissed: boolean;
+  /** True if the device currently has active internet connectivity */
+  isOnline: boolean;
   /** Triggers the native install prompt (Android) */
   showInstallPrompt: () => Promise<void>;
   /** Dismisses the iOS install banner and saves to localStorage */
@@ -46,6 +48,7 @@ const PWAContext = createContext<PWAContextValue>({
   isInstalled: false,
   isIOS: false,
   iosBannerDismissed: false,
+  isOnline: true,
   showInstallPrompt: async () => {},
   dismissIOSBanner: () => {},
 });
@@ -60,9 +63,16 @@ export function PWAProvider({ children }: { children: ReactNode }) {
   const [isInstalled, setIsInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [iosBannerDismissed, setIosBannerDismissed] = useState(false);
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const waitingSwRef = useRef<ServiceWorker | null>(null);
 
   useEffect(() => {
+    // Online / Offline listeners
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
     // Detect standalone mode
     const mq = window.matchMedia('(display-mode: standalone)');
     setIsInstalled(mq.matches || (navigator as Navigator & { standalone?: boolean }).standalone === true);
@@ -135,6 +145,8 @@ export function PWAProvider({ children }: { children: ReactNode }) {
     return () => {
       navigator.serviceWorker?.removeEventListener('message', handleMessage);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
@@ -172,6 +184,7 @@ export function PWAProvider({ children }: { children: ReactNode }) {
         isInstalled,
         isIOS,
         iosBannerDismissed,
+        isOnline,
         showInstallPrompt,
         dismissIOSBanner,
       }}

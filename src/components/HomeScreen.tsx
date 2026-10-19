@@ -8,14 +8,21 @@ import {
   ChartBarIcon,
   ExclamationCircleIcon,
   ArrowPathIcon,
+  SignalIcon,
+  ArrowDownTrayIcon,
+  WifiIcon,
+  DevicePhoneMobileIcon,
 } from '@heroicons/react/24/outline';
 import { sounds } from './AudioController';
 import { getPlayerName, setPlayerName } from '@/lib/gameEngine';
+import { usePWA } from '@/context/PWAContext';
 
 interface HomeScreenProps {
   onCreateGame: () => void;
   onJoinGame: (code?: string) => void;
   onLeaderboard: () => void;
+  onOpenOfflineModal: () => void;
+  onOpenInstallModal: () => void;
   loading: boolean;
   errorMessage?: string | null;
 }
@@ -24,12 +31,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onCreateGame,
   onJoinGame,
   onLeaderboard,
+  onOpenOfflineModal,
+  onOpenInstallModal,
   loading,
   errorMessage,
 }) => {
   const [quickCode, setQuickCode] = useState<string>('');
   const [playerName, setLocalPlayerName] = useState<string>('Duelist');
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
+  const { isInstalled, isOnline } = usePWA();
 
   useEffect(() => {
     setLocalPlayerName(getPlayerName());
@@ -43,7 +53,29 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   };
 
   return (
-    <div className="flex flex-col w-full max-w-md mx-auto gap-4 select-none pt-2">
+    <div className="flex flex-col w-full max-w-md mx-auto gap-3.5 select-none pt-1">
+      {/* Network Status Badge */}
+      <div className="flex items-center justify-between w-full px-1">
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-high border border-outline-variant text-[11px] font-semibold text-on-surface-variant">
+          <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-primary-container animate-pulse' : 'bg-amber-400'}`} />
+          <span>{isOnline ? 'Online Matchmaking Ready' : 'Offline / Local Mode Active'}</span>
+        </div>
+
+        {!isInstalled && (
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playTap();
+              onOpenInstallModal();
+            }}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary-container/15 hover:bg-primary-container/25 border border-primary-container/30 text-primary-container text-[11px] font-bold cursor-pointer transition-colors active:scale-95"
+          >
+            <ArrowDownTrayIcon className="w-3.5 h-3.5" />
+            <span>Install App</span>
+          </button>
+        )}
+      </div>
+
       {/* Error State Banner */}
       {errorMessage && (
         <div className="w-full relative overflow-hidden rounded-xl bg-error-container text-on-error-container border border-error/20 p-3 flex items-start gap-2.5 animate-fadeIn">
@@ -59,15 +91,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         </div>
       )}
 
-      {/* Hero Card: Apple Minimalist */}
-      <div className="relative w-full rounded-2xl bg-surface-container/80 backdrop-blur-xl p-6 shadow-xs border border-outline-variant overflow-hidden flex flex-col items-center text-center gap-3">
+      {/* Hero Card */}
+      <div className="relative w-full rounded-2xl bg-surface-container/80 backdrop-blur-xl p-5 shadow-xs border border-outline-variant overflow-hidden flex flex-col items-center text-center gap-2.5">
         {/* Central Emblem */}
-        <div className="relative w-16 h-16 rounded-2xl bg-surface-container-high flex items-center justify-center shadow-xs border border-outline-variant">
-          <Squares2X2Icon className="w-8 h-8 text-primary-container" />
+        <div className="relative w-14 h-14 rounded-2xl bg-surface-container-high flex items-center justify-center shadow-xs border border-outline-variant">
+          <Squares2X2Icon className="w-7 h-7 text-primary-container" />
         </div>
 
-        <div className="flex flex-col items-center gap-1">
-          <h1 className="font-headline-xl-mobile text-2xl text-on-surface tracking-tight font-bold">
+        <div className="flex flex-col items-center gap-0.5">
+          <h1 className="font-headline-xl-mobile text-2xl text-on-surface tracking-tight font-black">
             BINGO DUEL
           </h1>
           <p className="font-body-sm text-xs text-on-surface-variant max-w-[260px]">
@@ -76,7 +108,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         </div>
 
         {/* Player Identity Badge */}
-        <div className="pt-1">
+        <div className="pt-0.5">
           {isEditingName ? (
             <div className="flex items-center gap-1.5 bg-surface-container-high p-1.5 rounded-xl border border-primary-container">
               <input
@@ -100,7 +132,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 sounds.playTap();
                 setIsEditingName(true);
               }}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high border border-outline-variant text-on-surface-variant hover:text-on-surface transition-colors text-xs font-medium"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high border border-outline-variant text-on-surface-variant hover:text-on-surface transition-colors text-xs font-medium cursor-pointer"
             >
               <span>Playing as: <strong className="text-on-surface">{playerName}</strong></span>
               <PencilIcon className="w-3.5 h-3.5" />
@@ -109,11 +141,34 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         </div>
       </div>
 
-      {/* Primary Actions */}
-      <div className="flex flex-col w-full gap-3">
+      {/* Offline Play Banner */}
+      <div className="w-full rounded-2xl bg-gradient-to-r from-primary-container/15 via-surface-container-high to-secondary-container/15 border border-primary-container/30 p-3.5 flex items-center justify-between shadow-xs">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-primary-container/20 border border-primary-container/40 flex items-center justify-center text-primary-container shrink-0">
+            <SignalIcon className="w-5 h-5 animate-pulse" />
+          </div>
+          <div className="flex flex-col text-left">
+            <span className="text-xs font-bold text-on-surface">Offline & Local Duel Arena</span>
+            <span className="text-[11px] text-on-surface-variant">Wi-Fi IP · Hotspot · Bluetooth · Pass & Play</span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            sounds.playTap();
+            onOpenOfflineModal();
+          }}
+          className="px-3 py-1.5 rounded-xl bg-primary-container text-on-primary-container font-black text-xs shadow-xs active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+        >
+          PLAY OFFLINE
+        </button>
+      </div>
+
+      {/* Primary Actions (Online Duel) */}
+      <div className="flex flex-col w-full gap-2.5">
         {/* Host Game Button */}
         <button
-          className="relative w-full h-13 rounded-2xl bg-primary-container text-on-primary-container font-headline-sm text-base font-semibold shadow-xs active:scale-[0.98] transition-all flex items-center justify-between px-5 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
+          className="relative w-full h-12 rounded-2xl bg-primary-container text-on-primary-container font-headline-sm text-sm font-bold shadow-xs active:scale-[0.98] transition-all flex items-center justify-between px-5 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
           id="btn-create-game"
           type="button"
           disabled={loading}
@@ -128,7 +183,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             ) : (
               <PlusCircleIcon className="w-5 h-5" />
             )}
-            <span>{loading ? 'Creating Room...' : 'Create Game'}</span>
+            <span>{loading ? 'Creating Room...' : 'Create Game Room'}</span>
           </div>
           <span className="text-[10px] font-bold uppercase tracking-wider bg-white/20 text-white px-2 py-0.5 rounded-full">
             HOST
@@ -144,7 +199,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               onJoinGame(quickCode.trim());
             }
           }}
-          className="w-full rounded-2xl bg-surface-container/60 backdrop-blur-xl p-3.5 border border-outline-variant flex flex-col gap-2 shadow-xs"
+          className="w-full rounded-2xl bg-surface-container/60 backdrop-blur-xl p-3 border border-outline-variant flex flex-col gap-1.5 shadow-xs"
         >
           <span className="font-label-sm text-[11px] text-on-surface-variant uppercase tracking-wider font-semibold text-left px-1">
             Join with Room Code
@@ -156,12 +211,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               maxLength={6}
               value={quickCode}
               onChange={e => setQuickCode(e.target.value.toUpperCase())}
-              className="bg-surface-container-low flex-1 h-11 px-3.5 rounded-xl font-headline-sm text-sm tracking-widest text-on-surface uppercase placeholder:text-on-surface-variant/40 outline-none border border-outline-variant focus:border-primary-container transition-colors"
+              className="bg-surface-container-low flex-1 h-10 px-3.5 rounded-xl font-headline-sm text-xs tracking-widest text-on-surface uppercase placeholder:text-on-surface-variant/40 outline-none border border-outline-variant focus:border-primary-container transition-colors"
             />
             <button
               type="submit"
               disabled={quickCode.length < 3 || loading}
-              className="h-11 px-5 rounded-xl bg-surface-container-high hover:bg-primary-container hover:text-white text-on-surface font-semibold text-xs transition-all disabled:opacity-40 disabled:pointer-events-none active:scale-95 border border-outline-variant cursor-pointer"
+              className="h-10 px-4 rounded-xl bg-surface-container-high hover:bg-primary-container hover:text-white text-on-surface font-semibold text-xs transition-all disabled:opacity-40 disabled:pointer-events-none active:scale-95 border border-outline-variant cursor-pointer"
             >
               JOIN
             </button>
@@ -175,11 +230,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             sounds.playTap();
             onLeaderboard();
           }}
-          className="w-full h-11 rounded-2xl bg-surface-container/60 backdrop-blur-xl border border-outline-variant flex items-center justify-center gap-2 text-on-surface hover:text-primary-container hover:border-primary-container/40 transition-all active:scale-[0.98] shadow-xs cursor-pointer"
+          className="w-full h-10 rounded-2xl bg-surface-container/60 backdrop-blur-xl border border-outline-variant flex items-center justify-center gap-2 text-on-surface hover:text-primary-container hover:border-primary-container/40 transition-all active:scale-[0.98] shadow-xs cursor-pointer"
           id="btn-leaderboard"
         >
           <ChartBarIcon className="w-4 h-4 text-primary-container" />
-          <span className="font-semibold text-sm">Leaderboard</span>
+          <span className="font-semibold text-xs">Leaderboard & Stats</span>
         </button>
       </div>
     </div>
